@@ -25,7 +25,6 @@ export type AdminCapabilities = AdminPermissionMatrix
 
 export const ADMIN_PERMISSION_RESOURCES = {
   CHANNEL: 'channel',
-  REQUEST_SNAPSHOT: 'request_snapshot',
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {

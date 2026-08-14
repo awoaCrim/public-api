@@ -10,7 +10,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/requestsnapshot"
 	"github.com/QuantumNous/new-api/setting/requestsnapshot_setting"
 	"github.com/gin-gonic/gin"
@@ -21,9 +20,10 @@ import (
 )
 
 // newSnapshotEndpointTest wires the process-level snapshot service (used by
-// GetRequestSnapshot) against an in-memory SQLite main DB, a temp storage dir,
-// and a stable session identity with a valid request_snapshot.read proof.
-func newSnapshotEndpointTest(t *testing.T) (identity service.AuthIdentity, proof string) {
+// GetRequestSnapshot) against an in-memory SQLite main DB and a temp storage
+// directory. Root authorization belongs to the route; the controller keeps the
+// access-audit and storage fail-closed contracts.
+func newSnapshotEndpointTest(t *testing.T) {
 	t.Helper()
 
 	previousDB := model.DB
@@ -67,30 +67,20 @@ func newSnapshotEndpointTest(t *testing.T) (identity service.AuthIdentity, proof
 	t.Cleanup(func() {
 		*setting = previousSetting
 	})
-
-	identity = service.AuthIdentity{
-		UserID: 42, SessionID: "endpoint-snapshot-session", UserAuthVersion: 1, SessionVersion: 1,
-	}
-	proof, _, err = service.IssueSecurityProof(identity, "2fa", []string{snapshotProofScope})
-	require.NoError(t, err)
-	return identity, proof
 }
 
-func snapshotRequest(t *testing.T, identity service.AuthIdentity, requestID, proof string) *httptest.ResponseRecorder {
+func snapshotRequest(t *testing.T, requestID, proofHeader string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/log/"+requestID+"/snapshot", nil)
-	if proof != "" {
-		req.Header.Set("X-Security-Proof", proof)
+	if proofHeader != "" {
+		req.Header.Set("X-Security-Proof", proofHeader)
 	}
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
 	ctx.Request = req
 	ctx.Params = gin.Params{{Key: "request_id", Value: requestID}}
-	ctx.Set("id", identity.UserID)
-	ctx.Set("username", "endpoint-admin")
-	ctx.Set("session_id", identity.SessionID)
-	ctx.Set("auth_version", identity.UserAuthVersion)
-	ctx.Set("session_version", identity.SessionVersion)
+	ctx.Set("id", 42)
+	ctx.Set("username", "endpoint-root")
 	GetRequestSnapshot(ctx)
 	return rec
 }
@@ -103,55 +93,41 @@ func countAccessRows(t *testing.T, requestID string) int64 {
 	return count
 }
 
-func TestGetRequestSnapshotProofGate(t *testing.T) {
-	identity, validProof := newSnapshotEndpointTest(t)
-
-	// A proof with the wrong scope must be rejected.
-	wrongScopeProof, _, err := service.IssueSecurityProof(identity, "2fa", []string{"channel.key.read"})
-	require.NoError(t, err)
+func TestGetRequestSnapshotDoesNotRequireSecurityProof(t *testing.T) {
+	newSnapshotEndpointTest(t)
 
 	tests := []struct {
-		name         string
-		proof        string
-		expectedCode string
+		name        string
+		requestID   string
+		proofHeader string
 	}{
-		{name: "missing-proof", expectedCode: "SECURITY_PROOF_REQUIRED"},
-		{name: "wrong-scope-proof", proof: wrongScopeProof, expectedCode: "SECURITY_PROOF_SCOPE_MISMATCH"},
+		{name: "missing proof", requestID: "req-direct-missing-proof"},
+		{name: "invalid proof is ignored", requestID: "req-direct-invalid-proof", proofHeader: "not-a-valid-proof"},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rec := snapshotRequest(t, identity, "req-proof-"+tt.name, tt.proof)
-			assert.Equal(t, http.StatusForbidden, rec.Code)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rec := snapshotRequest(t, test.requestID, test.proofHeader)
+			assert.Equal(t, http.StatusNotFound, rec.Code)
 			var body struct {
 				Code string `json:"code"`
 			}
 			require.NoError(t, common.Unmarshal(rec.Body.Bytes(), &body))
-			assert.Equal(t, tt.expectedCode, body.Code)
+			assert.Equal(t, "SNAPSHOT_NOT_FOUND", body.Code)
 
-			// Failed post-permission attempts are audited synchronously.
-			assert.Equal(t, int64(1), countAccessRows(t, "req-proof-"+tt.name))
+			assert.Equal(t, int64(1), countAccessRows(t, test.requestID))
 			var access model.RequestSnapshotAccess
-			require.NoError(t, model.DB.Where("request_id = ?", "req-proof-"+tt.name).First(&access).Error)
+			require.NoError(t, model.DB.Where("request_id = ?", test.requestID).First(&access).Error)
 			assert.False(t, access.Success)
 			assert.Equal(t, model.RequestSnapshotActionRead, access.Action)
-			assert.Equal(t, tt.expectedCode, access.Result)
+			assert.Equal(t, model.SnapshotResultNotFound, access.Result)
 			assert.Equal(t, common.NodeName, access.Node)
-			assert.Equal(t, "endpoint-admin", access.Operator)
+			assert.Equal(t, "endpoint-root", access.Operator)
 		})
 	}
-
-	// A valid proof reaches the read path (request id does not exist).
-	rec := snapshotRequest(t, identity, "req-proof-valid-missing", validProof)
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	var body struct {
-		Code string `json:"code"`
-	}
-	require.NoError(t, common.Unmarshal(rec.Body.Bytes(), &body))
-	assert.Equal(t, "SNAPSHOT_NOT_FOUND", body.Code)
 }
 
 func TestGetRequestSnapshotSuccessRoundTripAndAudit(t *testing.T) {
-	identity, proof := newSnapshotEndpointTest(t)
+	newSnapshotEndpointTest(t)
 
 	payload := []byte("{\"messages\":[{\"role\":\"user\",\"content\":\"confidential\"}],\"stream\":true}")
 	require.NoError(t, requestsnapshot.Default().Capture(t.Context(), requestsnapshot.CaptureMeta{
@@ -159,7 +135,7 @@ func TestGetRequestSnapshotSuccessRoundTripAndAudit(t *testing.T) {
 		RelayFormat: "openai", Method: "POST", Path: "/v1/chat/completions", ContentType: "application/json",
 	}, payload))
 
-	rec := snapshotRequest(t, identity, "req-success", proof)
+	rec := snapshotRequest(t, "req-success", "")
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var body struct {
@@ -189,13 +165,13 @@ func TestGetRequestSnapshotSuccessRoundTripAndAudit(t *testing.T) {
 }
 
 func TestCreateSnapshotAccessPersistsSuccessAndFailsWhenAuditStoreIsUnavailable(t *testing.T) {
-	identity, _ := newSnapshotEndpointTest(t)
+	newSnapshotEndpointTest(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/log/req-audit/snapshot", nil)
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
 	ctx.Request = req
-	ctx.Set("id", identity.UserID)
-	ctx.Set("username", "endpoint-admin")
+	ctx.Set("id", 42)
+	ctx.Set("username", "endpoint-root")
 
 	require.NoError(t, createSnapshotAccess(ctx, "req-audit", 17, true, model.SnapshotResultOk))
 	assert.Equal(t, int64(1), countAccessRows(t, "req-audit"))
@@ -207,14 +183,14 @@ func TestCreateSnapshotAccessPersistsSuccessAndFailsWhenAuditStoreIsUnavailable(
 }
 
 func TestGetRequestSnapshotSafeCodes(t *testing.T) {
-	identity, proof := newSnapshotEndpointTest(t)
+	newSnapshotEndpointTest(t)
 
 	t.Run("deleted", func(t *testing.T) {
 		require.NoError(t, requestsnapshot.Default().Capture(t.Context(), requestsnapshot.CaptureMeta{
 			RequestID: "req-deleted", UserID: 42, ModelName: "m", RelayFormat: "openai",
 		}, []byte("gone")))
 		require.NoError(t, requestsnapshot.Default().Delete(t.Context(), "req-deleted"))
-		rec := snapshotRequest(t, identity, "req-deleted", proof)
+		rec := snapshotRequest(t, "req-deleted", "")
 		assert.Equal(t, http.StatusGone, rec.Code)
 		assert.Contains(t, rec.Body.String(), "SNAPSHOT_DELETED")
 		assert.Equal(t, int64(1), countAccessRows(t, "req-deleted"))
@@ -226,7 +202,7 @@ func TestGetRequestSnapshotSafeCodes(t *testing.T) {
 			RelativePath: "remote.snap",
 		}
 		require.NoError(t, model.CreateRequestSnapshot(otherRow))
-		rec := snapshotRequest(t, identity, "req-remote", proof)
+		rec := snapshotRequest(t, "req-remote", "")
 		assert.Equal(t, http.StatusConflict, rec.Code)
 		body := rec.Body.String()
 		assert.Contains(t, body, "SNAPSHOT_WRONG_NODE")
@@ -245,7 +221,7 @@ func TestGetRequestSnapshotSafeCodes(t *testing.T) {
 		nodeDir := filepath.Join(requestsnapshot_setting.GetSetting().StoragePath, requestsnapshot.NodeDirName(common.NodeName))
 		require.NoError(t, os.WriteFile(filepath.Join(nodeDir, row.RelativePath), []byte("tampered"), 0o600))
 
-		rec := snapshotRequest(t, identity, "req-corrupt", proof)
+		rec := snapshotRequest(t, "req-corrupt", "")
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 		assert.Contains(t, rec.Body.String(), "SNAPSHOT_CORRUPT")
 		var access model.RequestSnapshotAccess

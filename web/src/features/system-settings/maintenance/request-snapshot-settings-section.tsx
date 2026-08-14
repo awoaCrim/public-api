@@ -174,7 +174,7 @@ export function RequestSnapshotSettingsSection(props: Props) {
       <Alert>
         <AlertDescription>
           {t(
-            'Captures the complete body of authenticated relay requests for troubleshooting. Disabled by default; requires CRYPTO_SECRET or SESSION_SECRET to operate and request_snapshot.read permission to view.'
+            'Captures the complete body of authenticated relay requests for troubleshooting. Disabled by default; requires CRYPTO_SECRET or SESSION_SECRET to operate and is viewable only by root superusers.'
           )}
         </AlertDescription>
       </Alert>

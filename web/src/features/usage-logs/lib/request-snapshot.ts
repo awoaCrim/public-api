@@ -20,18 +20,6 @@ import axios from 'axios'
 
 import { api } from '@/lib/api'
 
-/**
- * The backend permission resource/action that gates request snapshot reads.
- * Mirrors service/authz/resources_requestsnapshot.go. There is intentionally
- * no default admin grant; only the root superuser (implicit) and explicitly
- * granted operators can view request bodies.
- */
-export const REQUEST_SNAPSHOT_RESOURCE = 'request_snapshot'
-export const REQUEST_SNAPSHOT_READ_ACTION = 'read'
-
-/** Secondary verification scope required to decrypt a snapshot. */
-export const REQUEST_SNAPSHOT_PROOF_SCOPE = 'request_snapshot.read'
-
 export interface RequestSnapshotPayload {
   request_id: string
   content_type: string
@@ -48,40 +36,22 @@ export interface SnapshotViewerUser {
   id?: number
   username?: string
   role?: number
-  permissions?: {
-    admin_permissions?: Record<string, Record<string, boolean>>
-  }
 }
 
 /** Mirrors ROLE.SUPER_ADMIN from @/lib/roles. */
 const SUPER_ADMIN_ROLE = 100
 
-function userHasSnapshotRead(
-  user: SnapshotViewerUser | null | undefined
-): boolean {
-  if (!user) return false
-  if (user.role === SUPER_ADMIN_ROLE) return true
-  return (
-    user.permissions?.admin_permissions?.[REQUEST_SNAPSHOT_RESOURCE]?.[
-      REQUEST_SNAPSHOT_READ_ACTION
-    ] === true
-  )
-}
-
 /**
  * Gating contract for the "View Request Body" control: it is shown only to
- * admins (role check), only when the log row carries a request id, and only
- * when the current user holds the request_snapshot.read permission. Root users
- * are implicitly allowed (superuser role).
+ * root superusers and only when the log row carries a request id. Request-body
+ * access is intentionally not delegatable to ordinary administrators.
  */
 export function canViewRequestSnapshot(
   user: SnapshotViewerUser | null | undefined,
-  isAdmin: boolean,
   requestId: string | undefined | null
 ): boolean {
-  if (!isAdmin) return false
   if (!requestId) return false
-  return userHasSnapshotRead(user)
+  return (user?.role ?? 0) >= SUPER_ADMIN_ROLE
 }
 
 /**
@@ -153,19 +123,16 @@ export interface RequestSnapshotResponse {
 }
 
 /**
- * Fetches the captured body of a request. The endpoint requires an admin
- * session, the request_snapshot.read permission, and a secondary security
- * proof for scope request_snapshot.read.
+ * Fetches the captured body of a request. The endpoint requires a root
+ * dashboard session and deliberately does not use a secondary proof.
  */
 export async function getRequestSnapshot(
-  requestId: string,
-  proofToken: string
+  requestId: string
 ): Promise<RequestSnapshotResponse> {
   try {
     const res = await api.get(
       `/api/log/${encodeURIComponent(requestId)}/snapshot`,
       {
-        headers: { 'X-Security-Proof': proofToken },
         disableDuplicate: true,
         skipBusinessError: true,
         skipErrorHandler: true,

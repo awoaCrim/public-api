@@ -25,8 +25,8 @@ type passkeyTestBody struct {
 
 func (*passkeyTestBody) Close() error { return nil }
 
-func TestRequestSnapshotSecurityProofScopeIsAllowed(t *testing.T) {
-	assert.True(t, isAllowedSecurityProofScope(securityProofScopeRequestSnapshotRead))
+func TestRequestSnapshotSecurityProofScopeIsNotAllowed(t *testing.T) {
+	assert.False(t, isAllowedSecurityProofScope("request_snapshot.read"))
 	assert.False(t, isAllowedSecurityProofScope("request_snapshot.write"))
 }
 

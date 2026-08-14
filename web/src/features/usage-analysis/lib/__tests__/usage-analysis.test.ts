@@ -21,8 +21,10 @@ import { describe, test } from 'node:test'
 
 import type { UsageAnalysisTrendPoint } from '../../api'
 import {
+  areUsageAnalysisSelectionsEqual,
   buildUsageAnalysisTrendData,
   getTodayUsageAnalysisRange,
+  hasSameUsageAnalysisDataScope,
   resetTokenSelectionForUser,
 } from '../usage-analysis'
 
@@ -92,6 +94,63 @@ describe('usage analysis helpers', () => {
       userId: '2',
       tokenId: 'all',
     })
+  })
+
+  test('recognizes unchanged filters even when state objects were recreated', () => {
+    const start = new Date(1_000)
+    const end = new Date(2_000)
+    const first = {
+      range: { start, end },
+      userId: 'all',
+      tokenId: 'all',
+      modelName: 'all',
+      channelId: 'all',
+    }
+    const second = {
+      ...first,
+      range: { start: new Date(1_000), end: new Date(2_000) },
+    }
+
+    assert.equal(areUsageAnalysisSelectionsEqual(first, second), true)
+    assert.equal(
+      areUsageAnalysisSelectionsEqual(first, { ...second, modelName: 'gpt' }),
+      false
+    )
+  })
+
+  test('keeps previous data only for pagination within the same filter scope', () => {
+    const firstPage = {
+      start_timestamp: 100,
+      end_timestamp: 200,
+      page: 1,
+      page_size: 20,
+      user_id: 7,
+      token_id: 11,
+      model_name: 'gpt-test',
+      channel_id: 19,
+    }
+
+    assert.equal(
+      hasSameUsageAnalysisDataScope({ ...firstPage, page: 2 }, firstPage),
+      true,
+      'changing only the page may retain the previous table while fetching'
+    )
+    assert.equal(
+      hasSameUsageAnalysisDataScope(
+        { ...firstPage, page: 1, user_id: 8 },
+        firstPage
+      ),
+      false,
+      'a user filter change must not relabel stale aggregate data'
+    )
+    assert.equal(
+      hasSameUsageAnalysisDataScope(
+        { ...firstPage, page: 1, start_timestamp: 101 },
+        firstPage
+      ),
+      false,
+      'a date-range change must load a fresh aggregate'
+    )
   })
 
   test('starts the default range at local midnight', () => {

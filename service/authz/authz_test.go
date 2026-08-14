@@ -107,9 +107,6 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 		},
 		// Newly registered resources are normalized to all-false for a user
 		// who was never granted them (no override is stored).
-		ResourceRequestSnapshot: {
-			ActionRead: false,
-		},
 		ResourceLLMReview: {
 			ActionRead: false,
 		},
@@ -140,9 +137,6 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 			ActionWrite:          true,
 			ActionSensitiveWrite: false,
 			ActionSecretView:     false,
-		},
-		ResourceRequestSnapshot: {
-			ActionRead: false,
 		},
 		ResourceLLMReview: {
 			ActionRead: false,

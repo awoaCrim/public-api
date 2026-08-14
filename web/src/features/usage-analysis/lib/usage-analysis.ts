@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { UsageAnalysisTrendPoint } from '../api'
+import type { UsageAnalysisParams, UsageAnalysisTrendPoint } from '../api'
 
 export type UsageAnalysisSelection = {
   range: { start: Date; end: Date }
@@ -26,12 +26,56 @@ export type UsageAnalysisSelection = {
   channelId: string
 }
 
+export type UsageAnalysisTrendDatum = {
+  timestamp: number
+  totalTokens: number
+  promptTokens: number
+  completionTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+}
+
+export function areUsageAnalysisSelectionsEqual(
+  first: UsageAnalysisSelection,
+  second: UsageAnalysisSelection
+): boolean {
+  return (
+    first.range.start.getTime() === second.range.start.getTime() &&
+    first.range.end.getTime() === second.range.end.getTime() &&
+    first.userId === second.userId &&
+    first.tokenId === second.tokenId &&
+    first.modelName === second.modelName &&
+    first.channelId === second.channelId
+  )
+}
+
 export function resetTokenSelectionForUser(
   current: UsageAnalysisSelection,
   userId: string,
   allValue = 'all'
 ): UsageAnalysisSelection {
   return { ...current, userId, tokenId: allValue }
+}
+
+/**
+ * Previous query data is safe to display only while moving between pages of
+ * the same aggregate. Reusing it after a filter/range change would label stale
+ * usage totals with the newly selected user, token, model, or channel.
+ */
+export function hasSameUsageAnalysisDataScope(
+  current: UsageAnalysisParams,
+  previous: UsageAnalysisParams | undefined
+): boolean {
+  if (!previous) return false
+  return (
+    current.start_timestamp === previous.start_timestamp &&
+    current.end_timestamp === previous.end_timestamp &&
+    current.page_size === previous.page_size &&
+    current.user_id === previous.user_id &&
+    current.token_id === previous.token_id &&
+    current.model_name === previous.model_name &&
+    current.channel_id === previous.channel_id
+  )
 }
 
 export function getTodayUsageAnalysisRange(now = new Date()): {
@@ -48,7 +92,7 @@ export function buildUsageAnalysisTrendData(
   start: Date,
   end: Date,
   bucketSeconds = 3600
-) {
+): UsageAnalysisTrendDatum[] {
   const firstBucket =
     Math.floor(start.getTime() / 1000 / bucketSeconds) * bucketSeconds
   const lastBucket =

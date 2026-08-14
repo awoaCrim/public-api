@@ -6,21 +6,11 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service/requestsnapshot"
 
 	"github.com/gin-gonic/gin"
 )
-
-// snapshotProofScope is the secondary-verification scope required to decrypt a
-// request snapshot. It mirrors the request_snapshot.read authorization
-// permission so both gates must be satisfied.
-const snapshotProofScope = securityProofScopeRequestSnapshotRead
-
-// snapshotAccessMethods are the secondary verification methods accepted for
-// reading a captured request body.
-var snapshotAccessMethods = []string{"2fa", "passkey"}
 
 func createSnapshotAccess(c *gin.Context, requestID string, snapshotID int64, success bool, result string) error {
 	return model.CreateRequestSnapshotAccess(&model.RequestSnapshotAccess{
@@ -37,9 +27,8 @@ func createSnapshotAccess(c *gin.Context, requestID string, snapshotID int64, su
 }
 
 // GetRequestSnapshot serves the captured body of a request. The route is
-// protected by AdminAuth + RequirePermission(request_snapshot.read); this
-// handler adds the secondary security proof and audits every post-permission
-// attempt synchronously.
+// protected by RootAuth and audits every read attempt synchronously. No
+// secondary verification or delegatable permission is required.
 func GetRequestSnapshot(c *gin.Context) {
 	requestID := c.Param("request_id")
 	snapshotID := int64(0)
@@ -57,19 +46,8 @@ func GetRequestSnapshot(c *gin.Context) {
 		return true
 	}
 
-	if !middleware.RequireSecurityProof(c, snapshotProofScope, snapshotAccessMethods) {
-		// Failed post-permission attempt: audit with the safe proof code. The
-		// proof code is a stable token, never request content.
-		result := c.GetString("security_proof_error")
-		if result == "" {
-			result = model.SnapshotResultDenied
-		}
-		recordAccess(false, truncateSnapshotResult(result))
-		return
-	}
-
-	// Permission and proof success are established before this point. Check the
-	// audit table before loading the body so a known audit outage never causes
+	// Root authorization is established by the route before this point. Check
+	// the audit table before loading the body so a known audit outage never causes
 	// snapshot bytes to be read into memory.
 	if err := model.CheckRequestSnapshotAccessStorage(); err != nil {
 		common.SysError("request snapshot access audit unavailable: " + err.Error())
@@ -140,13 +118,4 @@ func GetRequestSnapshot(c *gin.Context) {
 			"content_base64": base64.StdEncoding.EncodeToString(content),
 		},
 	})
-}
-
-// truncateSnapshotResult keeps safe result codes within the column width.
-func truncateSnapshotResult(result string) string {
-	const maxLen = 32
-	if len(result) > maxLen {
-		return result[:maxLen]
-	}
-	return result
 }

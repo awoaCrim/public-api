@@ -29,16 +29,11 @@ import {
   type SnapshotViewerUser,
 } from '../request-snapshot'
 
-function adminWith(
-  admin_permissions: Record<string, Record<string, boolean>>
-): SnapshotViewerUser {
+function viewerWithRole(role: number): SnapshotViewerUser {
   return {
     id: 1,
-    username: 'admin',
-    role: 10,
-    permissions: {
-      admin_permissions,
-    },
+    username: 'viewer',
+    role,
   }
 }
 
@@ -55,45 +50,42 @@ function snapshotPayload(
 }
 
 describe('request snapshot gating', () => {
-  test('requires admin, a request id, and the request_snapshot.read permission', () => {
-    const granted = adminWith({ request_snapshot: { read: true } })
-    const ungranted = adminWith({ request_snapshot: { read: false } })
+  test('shows request snapshots only to root users with a request id', () => {
+    const root = viewerWithRole(100)
+    const admin = viewerWithRole(10)
 
-    assert.equal(canViewRequestSnapshot(granted, true, 'req-1'), true)
+    assert.equal(canViewRequestSnapshot(root, 'req-1'), true)
     assert.equal(
-      canViewRequestSnapshot(granted, false, 'req-1'),
-      false,
-      'non-admin is never allowed'
+      canViewRequestSnapshot(viewerWithRole(101), 'req-1'),
+      true,
+      'roles above the root threshold follow the backend RootAuth contract'
     )
     assert.equal(
-      canViewRequestSnapshot(granted, true, ''),
+      canViewRequestSnapshot(admin, 'req-1'),
+      false,
+      'ordinary administrators cannot view captured request bodies'
+    )
+    assert.equal(
+      canViewRequestSnapshot(root, ''),
       false,
       'missing request id is never allowed'
     )
-    assert.equal(canViewRequestSnapshot(granted, true, null), false)
+    assert.equal(canViewRequestSnapshot(root, null), false)
     assert.equal(
-      canViewRequestSnapshot(ungranted, true, 'req-1'),
+      canViewRequestSnapshot(null, 'req-1'),
       false,
-      'missing permission is never allowed'
-    )
-    assert.equal(
-      canViewRequestSnapshot(null, true, 'req-1'),
-      false,
-      'anonymous user is never allowed'
+      'anonymous users are never allowed'
     )
   })
 
-  test('root superuser is implicitly allowed without an explicit grant', () => {
-    const root = adminWith({}) as SnapshotViewerUser
-    root.role = 100
-    assert.equal(canViewRequestSnapshot(root, true, 'req-1'), true)
-  })
-
-  test('unknown users or users without permissions are denied', () => {
-    assert.equal(
-      canViewRequestSnapshot({ id: 2, username: 'u', role: 10 }, true, 'req-1'),
-      false
-    )
+  test('delegated request_snapshot permissions do not grant visibility', () => {
+    const delegated = {
+      ...viewerWithRole(10),
+      permissions: {
+        admin_permissions: { request_snapshot: { read: true } },
+      },
+    }
+    assert.equal(canViewRequestSnapshot(delegated, 'req-1'), false)
   })
 })
 

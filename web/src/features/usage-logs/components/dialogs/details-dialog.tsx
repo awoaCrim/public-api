@@ -742,12 +742,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
           )}
         </div>
 
-        {/* Captured request body (admin + request_snapshot.read only) */}
-        {canViewRequestSnapshot(
-          currentUser,
-          props.isAdmin,
-          props.log.request_id
-        ) && (
+        {/* Captured request body (root superuser only) */}
+        {canViewRequestSnapshot(currentUser, props.log.request_id) && (
           <RequestSnapshotSection
             requestId={props.log.request_id}
             parentOpen={props.open}

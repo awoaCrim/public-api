@@ -55,7 +55,6 @@ const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { RequestSnapshotSection } =
   await import('../dialogs/request-snapshot-section')
-const { toast } = await import('sonner')
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -80,17 +79,6 @@ const reactTestGlobals = globalThis as typeof globalThis & {
 }
 reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 
-// The secure-verification hook probes 2FA/passkey status on mount (a real
-// network call that fails inside the harness); the hook already swallows the
-// failure but logs it. Silence the expected console noise.
-// eslint-disable-next-line no-console
-const originalConsoleError = console.error
-// eslint-disable-next-line no-console
-console.error = (...args: unknown[]) => {
-  if (String(args[0]).includes('[Secure Verification]')) return
-  originalConsoleError(...args)
-}
-
 const SNAPSHOT_PAYLOAD = {
   request_id: 'req-1',
   content_type: 'application/json',
@@ -100,48 +88,29 @@ const SNAPSHOT_PAYLOAD = {
 
 function harness({
   onFetch,
-  onStartVerification,
 }: {
-  onFetch?: (
-    requestId: string,
-    proofToken: string
-  ) => Promise<RequestSnapshotResponse>
-  onStartVerification?: (
-    apiCall: (proofToken?: string) => Promise<unknown>,
-    _config: unknown
-  ) => Promise<boolean>
+  onFetch?: (requestId: string) => Promise<RequestSnapshotResponse>
 }) {
   const container = document.createElement('div')
   document.body.append(container)
   const root = createRoot(container)
-  const fetchCalls: Array<{ requestId: string; proofToken: string }> = []
+  const fetchCalls: string[] = []
 
   const fetchSnapshot =
     onFetch ??
-    (async (requestId: string, proofToken: string) => {
-      fetchCalls.push({ requestId, proofToken })
+    (async (requestId: string) => {
+      fetchCalls.push(requestId)
       return { success: true, data: SNAPSHOT_PAYLOAD }
     })
 
-  const startVerification =
-    onStartVerification ??
-    (async (
-      apiCall: (proofToken?: string) => Promise<unknown>,
-      _config: unknown
-    ) => {
-      await apiCall('fake-proof-token')
-      return true
-    })
-
-  const renderAt = async (nextParentOpen: boolean) => {
+  const renderAt = async (nextParentOpen: boolean, requestId = 'req-1') => {
     await act(async () => {
       root.render(
         <I18nextProvider i18n={i18n}>
           <RequestSnapshotSection
-            requestId='req-1'
+            requestId={requestId}
             parentOpen={nextParentOpen}
             fetchSnapshot={fetchSnapshot}
-            startVerification={startVerification}
           />
         </I18nextProvider>
       )
@@ -168,16 +137,13 @@ async function unmount(rendered: {
 
 describe('request snapshot section', () => {
   after(() => {
-    // eslint-disable-next-line no-console
-    console.error = originalConsoleError
     domWindow.close()
   })
 
-  test('fetches only on click and renders the exact body text', async () => {
+  test('fetches directly on click and renders the exact body text', async () => {
     const rendered = harness({})
     await rendered.renderAt(true)
 
-    // Nothing is fetched and nothing is shown until the button is clicked.
     assert.equal(rendered.fetchCalls.length, 0)
     const initialButton = rendered.container.querySelector('button')
     assert.ok(initialButton)
@@ -187,10 +153,12 @@ describe('request snapshot section', () => {
       initialButton.click()
     })
 
-    // The injected startVerification invoked the api call with the proof.
-    assert.equal(rendered.fetchCalls.length, 1)
-    assert.equal(rendered.fetchCalls[0].requestId, 'req-1')
-    assert.equal(rendered.fetchCalls[0].proofToken, 'fake-proof-token')
+    assert.deepEqual(rendered.fetchCalls, ['req-1'])
+    assert.equal(
+      rendered.container.querySelector('[role="dialog"]'),
+      null,
+      'direct root access must not open a secondary verification dialog'
+    )
 
     const content = rendered.container.querySelector(
       '[data-request-snapshot-content="true"]'
@@ -237,6 +205,63 @@ describe('request snapshot section', () => {
     await unmount(rendered)
   })
 
+  test('ignores an in-flight response after the parent dialog closes', async () => {
+    let resolveFetch: ((value: RequestSnapshotResponse) => void) | undefined
+    const pendingFetch = new Promise<RequestSnapshotResponse>((resolve) => {
+      resolveFetch = resolve
+    })
+    const rendered = harness({ onFetch: async () => pendingFetch })
+    await rendered.renderAt(true)
+
+    await act(async () => {
+      ;(rendered.container.querySelector('button') as HTMLButtonElement).click()
+    })
+    await rendered.renderAt(false)
+
+    await act(async () => {
+      assert.ok(resolveFetch)
+      resolveFetch({ success: true, data: SNAPSHOT_PAYLOAD })
+      await pendingFetch
+    })
+    await rendered.renderAt(true)
+
+    assert.equal(
+      rendered.container.querySelector(
+        '[data-request-snapshot-content="true"]'
+      ),
+      null,
+      'a response from the closed dialog must not restore sensitive content'
+    )
+    assert.match(rendered.container.textContent ?? '', /View Request Body/)
+
+    await unmount(rendered)
+  })
+
+  test('never renders a payload returned for a different request id', async () => {
+    const rendered = harness({
+      onFetch: async () => ({ success: true, data: SNAPSHOT_PAYLOAD }),
+    })
+    await rendered.renderAt(true, 'req-2')
+
+    await act(async () => {
+      ;(rendered.container.querySelector('button') as HTMLButtonElement).click()
+    })
+
+    assert.equal(
+      rendered.container.querySelector(
+        '[data-request-snapshot-content="true"]'
+      ),
+      null,
+      'a mismatched response must not expose another log row body'
+    )
+    assert.match(
+      rendered.container.textContent ?? '',
+      /Failed to load request body/
+    )
+
+    await unmount(rendered)
+  })
+
   test('surfaces stable backend error codes', async () => {
     const rendered = harness({
       onFetch: async () => ({
@@ -253,26 +278,9 @@ describe('request snapshot section', () => {
 
     assert.match(rendered.container.textContent ?? '', /Snapshot not found/)
     assert.equal(
-      rendered.container.querySelector(
-        '[data-request-snapshot-content="true"]'
-      ),
-      null
+      rendered.container.querySelector('[role="alert"]')?.textContent,
+      'Snapshot not found'
     )
-
-    await unmount(rendered)
-  })
-
-  test('does not fetch when verification never completes', async () => {
-    const rendered = harness({
-      onStartVerification: async () => false, // user cancelled / no methods
-    })
-    await rendered.renderAt(true)
-
-    await act(async () => {
-      ;(rendered.container.querySelector('button') as HTMLButtonElement).click()
-    })
-
-    assert.equal(rendered.fetchCalls.length, 0)
     assert.equal(
       rendered.container.querySelector(
         '[data-request-snapshot-content="true"]'
@@ -282,6 +290,4 @@ describe('request snapshot section', () => {
 
     await unmount(rendered)
   })
-
-  void toast
 })

@@ -328,10 +328,9 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 		logRoute.GET("/:request_id/snapshot",
-			middleware.AdminAuth(),
+			middleware.RootAuth(),
 			middleware.CriticalRateLimit(),
 			middleware.DisableCache(),
-			middleware.RequirePermission(authz.RequestSnapshotRead),
 			controller.GetRequestSnapshot,
 		)
 
