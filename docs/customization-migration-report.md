@@ -2,9 +2,9 @@
 
 > 生成日期：2026-08-15
 > 分支：`rebuild/customizations-20260812`
-> 产品提交：`da678d51`（`feat: rebuild customizations on latest upstream`）
+> 产品提交：`bd8b8746`（`feat: restore admin observability UX`）；前序完整重建提交为 `da678d51`
 > 基线：`ccd535ef8e50cf6e5846a59278c40b7ff59d1b7d`（上游 `QuantumNous/new-api`）
-> 部署：2026-08-14 20:48 +08:00 已部署到 `ssh2`，镜像 `newapi-custom:20260814-remediated-da678d51`；未 push
+> 部署：2026-08-15 04:25 +08:00 已部署到 `ssh2`，镜像 `newapi-custom:20260815-observability-bd8b8746`，分支已 push 至 `origin/rebuild/customizations-20260812`
 
 ## 1. 交付范围
 
@@ -33,6 +33,7 @@
 | 前端 `bun run typecheck` | ✅ |
 | 前端 `bun run build` | ✅ |
 | 前端 `bun test src/features` | ✅ 仅基线预存失败（见 §4） |
+| 本次可观测性 focused Bun tests | ✅ 23/23 |
 | `git diff --check` | ✅（仅既有 `sync-i18n.mjs` LF/CRLF 提示） |
 | 七 locale i18n 同步 | ✅（`0 missing / 0 extras / 0 untranslated`） |
 | 临时脚本/`.pi`/`.review` 残留 | ✅ 无 |
@@ -40,7 +41,7 @@
 
 ## 3. 默认关闭与权限边界（安全摘要）
 
-- **请求快照**：默认关闭；`request_snapshot.read` 专用权限（无默认角色）+ 2FA/Passkey proof；HKDF/AES-256-GCM、容量与保留期清理；更换 `CRYPTO_SECRET` 会使旧快照不可读——密钥轮换必须与保留期清理配套（见 inventory §3.5）。
+- **请求快照**：默认关闭；内容仅 Root 超级管理员可直接读取，不可委派且不要求 2FA/Passkey proof；仍保留读取审计、HKDF/AES-256-GCM、容量与保留期清理；更换 `CRYPTO_SECRET` 会使旧快照不可读——密钥轮换必须与保留期清理配套（见 inventory §3.5）。
 - **IP 黑名单**：默认关闭（`ip_blacklist_setting.Enabled`）；exact IPv4；root 豁免；Redis + 主库精确回源。
 - **LLM Review**：默认关闭；`llm_review.read` 无默认授权 + 2FA/Passkey proof；配置/测试/清理 root-only；API Key 加密存储。
 - **输入 Token 前置限制**：总开关默认关闭（`max_input_tokens=200000`、`max_output_tokens=10000`）；未过校准验收 fail-open。
@@ -59,7 +60,7 @@
 
 ## 5. 部署与启用指引
 
-1. **代码部署**：产品提交 `da678d51` 已构建并部署到 `ssh2`；容器镜像为 `newapi-custom:20260814-remediated-da678d51`，`/api/status` 返回 200，容器运行且重启次数为 0。远程仓库尚未 push。
+1. **代码部署**：产品提交 `bd8b8746` 已推送至 `origin/rebuild/customizations-20260812`，并于 2026-08-15 04:25 +08:00 构建部署到 `ssh2`；容器镜像为 `newapi-custom:20260815-observability-bd8b8746`，镜像 ID 为 `sha256:bc3a6c51743b88aca6909bbb9d66a063eda666e2331752b7ca4dfd7cf786a794`，`/api/status` 和首页均返回 200，容器运行且重启次数为 0。部署前 SQLite 备份位于 `/opt/newapi/backups/deploy-20260815-042500-bd8b8746`，`PRAGMA integrity_check` 返回 `ok`。
 2. **schema**：新表在启动时经 `migrateDB`/`migrateDBFast` 自动创建（`user_group_grants`、`channel_model_group_overrides`、`channel_model_group_disabled`、LLM Review 4 表、IP 黑名单、快照 2 表、日志新列等）。
 3. **旧 routing_groups 数据**：启动诊断发现未映射旧分组 key `渠道1`，因此严格迁移尚未执行，避免静默丢失授权。处理该 key 后按 `docs/routing-group-migration-manual.md` 执行 preview → readiness → run。
 4. **可选功能**均默认关闭：按需在管理端开启（IP 黑名单、LLM Review、输入 Token 前置限制、用户级 Vision）。
@@ -74,5 +75,5 @@
 
 - 核对旧分组 key `渠道1` 的 canonical 映射，处理 blocker 后再运行严格兼容迁移；当前旧表未被写入或删除。
 - 生产日志提示 `SESSION_COOKIE_SECURE` 未开启，且 `TRUSTED_PROXIES` 使用兼容默认值；应结合现有 Caddy 反向代理配置单独确认。
-- 当前提交未 push；如需远程备份或 PR，另行执行。
+- 当前产品与文档提交已 push 至 `origin/rebuild/customizations-20260812`；未创建 PR，未向 `upstream` 推送。
 - 可选功能仍保持默认关闭，应按业务需要逐项启用。

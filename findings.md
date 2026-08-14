@@ -34,7 +34,7 @@
 
 旧变更日志之外还确认了一项高置信度定制：输入 Token 前置硬限制与估算器校准验收。它依赖 LLM Review 和实际 usage，建议作为可独立关闭的功能一并迁移。
 
-最新阶段 2 结果：安全请求快照已按完整内容语义完成安全重写。实现默认关闭；只有显式稳定 secret 才运行；使用专用无默认 admin grant 的 `request_snapshot.read`、2FA/Passkey proof、主库 metadata/access audit、HKDF-SHA256 + AES-256-GCM 节点本地原子文件、容量/retention/orphan/missing/terminal 有界清理、no-store/rate limit 与前端按需查看/下载。独立 review 发现的 proof scope 不可签发、成功审计未 fail-closed、terminal row 无界、通用错误路径泄露及设置溢出均已修复。
+最新阶段 2 结果：安全请求快照已按完整内容语义完成安全重写。实现默认关闭；只有显式稳定 secret 才运行；内容读取仅允许 Root 超级管理员直接访问，不可委派且不再要求 2FA/Passkey proof；仍保留主库 metadata/access audit、HKDF-SHA256 + AES-256-GCM 节点本地原子文件、容量/retention/orphan/missing/terminal 有界清理、no-store/rate limit 与前端按需查看/下载。成功审计 fail-closed、terminal row 有界、通用错误路径安全码及设置溢出保护保持不变。
 
 结构化缓存指标与 SQL Usage Analysis 也已完成：日志在写入时持久化 cache read/write（含 Claude 5m/1h）和 total input，并对负值及 ClickHouse Int32 上界做饱和保护；在线查询仅执行 SQL aggregate/group/pagination，不再加载原始日志或解析 `other` JSON。Root-only API 具备 24h 默认、90d 上限、15s timeout、最大 page size 100；summary/count/rows/trend、options 和渠道名解析均绑定 deadline，options 有结果上限且模型只扫描最近 90 天；legacy rows 被计数但从 cache-rate 分子和分母排除。前端提供 root 路由、筛选、summary、trend、分页明细与七 locale，Refresh 可显式重试，分页保留旧数据，错误统一页内展示。
 

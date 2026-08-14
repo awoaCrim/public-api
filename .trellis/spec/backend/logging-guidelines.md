@@ -61,6 +61,73 @@ Log type values in `model/log.go` are persisted data. The source explicitly says
 
 The log database can be SQLite/MySQL/PostgreSQL or ClickHouse. `model/log.go` and `model/main.go` already branch ClickHouse ordering, filtering, display IDs, DDL, and TTL handling. New log queries must use `LOG_DB` and account for ClickHouse behavior where the existing helper branches.
 
+## Scenario: Root-only request snapshot reads
+
+### 1. Scope / Trigger
+
+This contract applies whenever `GET /api/log/:request_id/snapshot`, request-snapshot authorization, or the Usage Log request-body viewer changes. Snapshot bodies can contain credentials and personal data, so backend authorization, audit ordering, cache headers, and frontend visibility must move together.
+
+### 2. Signatures
+
+- API: `GET /api/log/:request_id/snapshot`
+- Route middleware: `RootAuth()`, `CriticalRateLimit()`, `DisableCache()`
+- Controller: `controller.GetRequestSnapshot(c *gin.Context)`
+- Audit writer: `model.CreateRequestSnapshotAccess(*model.RequestSnapshotAccess)`
+- Frontend loader: `getRequestSnapshot(requestId: string): Promise<RequestSnapshotResponse>`
+
+### 3. Contracts
+
+- Only roles accepted by `RootAuth` may reach the controller; request snapshot access is not a delegatable `authz` resource and does not use 2FA/Passkey security proofs.
+- The body remains absent from usage-log list responses and is fetched only after the Root user clicks the viewer.
+- A successful response contains `request_id`, `content_type`, `size`, and exact `content_base64` bytes.
+- Before reading bytes, `RequestSnapshotAccess` storage must be available. Before returning successful content, the success audit row must be durable.
+- Responses use `DisableCache` headers. The frontend keeps decrypted content only in component state, invalidates in-flight responses on close/row change/unmount, and rejects a payload whose `request_id` differs from the active row.
+
+### 4. Validation & Error Matrix
+
+- Missing/invalid dashboard credential -> authentication middleware rejection.
+- Non-Root role -> `403 AUTH_INSUFFICIENT_PRIVILEGE`; controller and snapshot audit table are not reached.
+- Audit storage unavailable -> `500 SNAPSHOT_AUDIT_FAILED`; no body bytes are returned.
+- Missing/deleted/local-file-missing snapshot -> stable `SNAPSHOT_NOT_FOUND`, `SNAPSHOT_DELETED`, or `SNAPSHOT_MISSING` response and failed audit row.
+- Snapshot owned by another node -> `409 SNAPSHOT_WRONG_NODE` with `owner_node` and failed audit row.
+- Integrity failure -> `500 SNAPSHOT_CORRUPT` and failed audit row.
+
+### 5. Good/Base/Bad Cases
+
+- Good: Root clicks View Request Body, the endpoint reads and audits exact bytes, and the component clears them when the dialog closes.
+- Base: Root requests an unknown ID, receives `SNAPSHOT_NOT_FOUND`, and the failed read is audited without exposing paths.
+- Bad: adding `AdminAuth`, a delegatable permission, or a proof header on only one side; returning bytes before the success audit; or rendering a late/mismatched payload after switching rows.
+
+### 6. Tests Required
+
+- Router regression: admin is rejected before the handler; Root reaches the handler without a proof; no-cache headers are present.
+- Controller regression: exact byte round-trip, stable error codes, per-result audit rows, and success fail-closed when audit storage fails.
+- Frontend gating regression: only Root roles with a request ID see the control; legacy permission maps do not grant visibility.
+- Frontend lifecycle regression: direct click fetch, close/unmount/row-change invalidation, mismatched response-ID rejection, copy/download behavior, and localized error display.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+logRoute.GET("/:request_id/snapshot", middleware.AdminAuth(), controller.GetRequestSnapshot)
+```
+
+This exposes the handler to ordinary administrators and omits the required rate-limit/no-cache boundary.
+
+#### Correct
+
+```go
+logRoute.GET("/:request_id/snapshot",
+    middleware.RootAuth(),
+    middleware.CriticalRateLimit(),
+    middleware.DisableCache(),
+    controller.GetRequestSnapshot,
+)
+```
+
+The frontend Root-role gate is a discoverability control only; `RootAuth` remains the authoritative security boundary.
+
 ## Error logging at boundaries
 
 Return a safe/generic client error while logging enough internal detail to diagnose the incident:

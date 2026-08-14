@@ -28,7 +28,7 @@
 - 用户已确认 RPM 使用最终代码语义，不恢复早期自动封禁。
 - HANDOFF 4.2.1 OpenAI-compatible usage 行为差异测试与归一化已完成（未提交）：新增流式任意 chunk usage 捕获与跨 chunk 缓存合并、input/output 别名归一化（流式+非流式 seam）、负值拒绝与缓存超 prompt 的计费安全测试；`relay/channel/openai`、`relay/channel/opencodego` 测试通过，`relaykit` GOWORK=off 构建通过，`git diff --check` 通过；未改 service/relaykit，无 staged 文件。
 - HANDOFF 4.1（OpenCode Go 第三轮复核 3 项缺口）已完成（未提交）：billing header 清理收窄为仅剥离 header 区域（同行正文保留）、CCH token 按合法字符界定边界（标点后正文保留）、`CHANNEL_TYPE_CONFIGS[45]` 补齐 VolcEngine 默认 base URL 并新增 `getBaseUrlForChannelTypeChange`（默认值替换/自定义保留）；均补回归测试（adaptor_test.go 的 header/CCH 用例 + `channel-base-url-switch.test.ts`）。定向 Go 测试、前端 focused test、`bun run typecheck`、`relaykit` GOWORK=off 构建、`git diff --check` 均通过。
-- 安全请求快照已完成（未提交）：默认关闭；完整字节保存、不脱敏不截断；显式稳定 secret 才可运行；HKDF-SHA256 + AES-256-GCM、AAD、原子本地文件、节点隔离；主库 metadata/audit 表；专用 `request_snapshot.read`（无默认 admin grant）+ 2FA/Passkey proof；成功返回正文前 audit fail-closed；no-store + critical rate limit；节点容量/retention/orphan/missing/terminal/access/tombstone 有界清理；Operations 设置与 Usage Log 按需查看/复制/下载；七 locale i18n 同步完成。独立 security/lifecycle/authz/frontend/oracle review 的 blocker/high 缺口均已修复；剩余仅为 cleanup 全节点 metadata 扫描、setting lock-free 与 secret 轮换等非阻断运行风险。Focused Go/Bun、`go build ./...`、typecheck、changed-file oxlint、relaykit 独立 build、`git diff --check` 均通过，无 staged 文件。
+- 安全请求快照已完成（未提交）：默认关闭；完整字节保存、不脱敏不截断；显式稳定 secret 才可运行；HKDF-SHA256 + AES-256-GCM、AAD、原子本地文件、节点隔离；主库 metadata/audit 表；内容读取改为仅 Root 超级管理员直接访问，不可委派且不再要求 2FA/Passkey proof；成功返回正文前 audit fail-closed；no-store + critical rate limit；节点容量/retention/orphan/missing/terminal/access/tombstone 有界清理；Operations 设置与 Usage Log 按需查看/复制/下载；七 locale i18n 同步完成。独立 security/lifecycle/authz/frontend/oracle review 的 blocker/high 缺口均已修复；剩余仅为 cleanup 全节点 metadata 扫描、setting lock-free 与 secret 轮换等非阻断运行风险。Focused Go/Bun、`go build ./...`、typecheck、changed-file oxlint、relaykit 独立 build、`git diff --check` 均通过，无 staged 文件。
 - 结构化缓存指标 + SQL Usage Analysis 已完成（未提交）：consume log 新增 cache read/write（含 5m/1h）和 total input 列，文本、Audio、Realtime/WSS、渠道测试写入 normalized/effective billing usage，并对负数/Int32 上界做饱和；ClickHouse 建表及幂等增列已覆盖。Root-only API 使用 SQL summary/grouped pagination/hourly trend，不加载原始日志、不解析 `other` JSON；default 24h、max 90d、15s timeout、page size max 100；summary/count/rows/trend、options 和渠道名解析均绑定 deadline，options 有结果上限且模型只扫最近 90 天；legacy rows 单独计数并从 cache-rate 计算排除。前端新增 root 路由/侧栏、日期与四维筛选、summary、趋势图和分页明细，Refresh 显式重试、分页保留旧数据、错误统一页内显示，七 locale 同步。两轮独立 SQL/auth/frontend/regression review 的 actionable findings 均已处理。Focused Go/Bun、typecheck、changed-file lint、frontend build、root build、relaykit standalone build、`git diff --check` 通过；无 staged 文件。全量 Go 仍有既有 channel-affinity 共享状态污染，HTTP/2 retry 测试在全量并发下于 Windows 偶发 socket abort、单独复跑通过。
 
 ## 2026-08-14
@@ -97,8 +97,16 @@
 - 启动 migration 成功；routing-group readiness 检测到旧分组 key `渠道1` 无法映射，因此严格迁移未自动执行，旧表保持只读。
 - 启动日志另提示 `SESSION_COOKIE_SECURE` 未开启、`TRUSTED_PROXIES` 使用兼容默认值；待结合现有 Caddy 配置确认。
 
+## 2026-08-15 04:25 +08:00（可观测性 UX 提交、推送与 ssh2 部署）
+
+- 已将 Root-only 请求体直读、独立 Request Snapshots 设置入口、恢复版 Usage Analysis、回归测试和七语言翻译提交为 `bd8b8746`（`feat: restore admin observability UX`）。
+- 已推送并建立跟踪：`origin/rebuild/customizations-20260812`。
+- 从精确提交构建镜像 `newapi-custom:20260815-observability-bd8b8746`，镜像 ID：`sha256:bc3a6c51743b88aca6909bbb9d66a063eda666e2331752b7ca4dfd7cf786a794`。
+- 部署前备份：`/opt/newapi/backups/deploy-20260815-042500-bd8b8746`；SQLite 在线备份 `PRAGMA integrity_check` 返回 `ok`，同时保留 Compose、`.env`、旧源码和旧镜像元数据。
+- `newapi` 容器切换后运行正常、重启次数 0，`/api/status` 与首页均返回 HTTP 200；未修改环境变量，未执行严格 routing-group 迁移。
+
 ## 当前阶段
 
-- 阶段 1–7、独立 Review、Remediation、产品提交和 `ssh2` 部署均已完成。
+- 阶段 1–7、独立 Review、Remediation、产品提交、推送和 `ssh2` 部署均已完成。
 - 下一步：处理 routing-group blocker `渠道1` 后执行严格迁移；按需确认 cookie/proxy 生产配置。
-- 当前未 push。
+- 当前分支已 push；未创建 PR，未向 `upstream` 推送。

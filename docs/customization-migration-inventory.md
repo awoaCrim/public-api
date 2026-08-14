@@ -450,7 +450,7 @@ tokens.routing_mode
 - 不迁移旧 `task_plan.md`、`findings.md`、`progress.md` 的历史副本。
 - 不迁移 ssh2 路径、镜像名、容器 inspect、数据库备份路径或生产部署状态。
 - 不复制旧 README 的定制改写。
-- 不提交、不推送、不部署，直到用户另行确认。
+- 在用户明确确认前不提交、不推送、不部署；本次用户已确认后，产品提交 `bd8b8746` 已推送并部署，过程运行时与任务资产仍不纳入产品发布。
 
 ## 9. 建议迁移批次
 
@@ -504,7 +504,7 @@ tokens.routing_mode
 - 已确认的用户额外分组、固定/Auto Token 和渠道模型三态；
 - 所有 fail-closed 兼容迁移和对账工具。
 
-用户已确认保留完整请求体。实现已完成：默认关闭，使用专用 `request_snapshot.read` + 2FA/Passkey proof、主库 metadata/access audit、HKDF + AES-256-GCM 节点本地原子文件、容量与 retention/orphan/missing/terminal 清理、no-store/rate limit 及前端按需查看/复制/下载。独立 review 后已修复 proof scope 签发、审计 fail-closed、terminal row 有界清理、通用错误路径泄露和设置溢出问题。
+用户已确认保留完整请求体。实现已完成：默认关闭，内容读取仅允许 Root 超级管理员直接访问（不可委派、不要求 2FA/Passkey proof），并保留主库 metadata/access audit、HKDF + AES-256-GCM 节点本地原子文件、容量与 retention/orphan/missing/terminal 清理、no-store/rate limit 及前端按需查看/复制/下载。成功返回前审计 fail-closed、terminal row 有界清理、通用错误安全码和设置溢出保护保持不变。
 
 ## 11. 全局验收门槛
 

@@ -1,7 +1,7 @@
 # 交接文档：New API 定制重建
 
-> 更新日期：2026-08-14
-> 交接范围：阶段 1–7、Review remediation、产品提交和 `ssh2` 部署均已完成。产品提交：`da678d51`；部署镜像：`newapi-custom:20260814-remediated-da678d51`。当前未 push；严格 routing-group 迁移因旧 key `渠道1` 阻断而未执行。交付报告：`docs/customization-migration-report.md`；迁移/回滚手册：`docs/routing-group-migration-manual.md`。
+> 更新日期：2026-08-15
+> 交接范围：阶段 1–7、Review remediation、产品提交、推送和 `ssh2` 部署均已完成。最新产品提交：`bd8b8746`（`feat: restore admin observability UX`）；部署镜像：`newapi-custom:20260815-observability-bd8b8746`。分支已推送至 `origin/rebuild/customizations-20260812`；严格 routing-group 迁移因旧 key `渠道1` 阻断而未执行。交付报告：`docs/customization-migration-report.md`；迁移/回滚手册：`docs/routing-group-migration-manual.md`。
 > 接手须知：本文是后续开发者的唯一入口。先读本文，再读 `docs/customization-migration-inventory.md`（功能清单）、`findings.md`（发现与基线验证）、`task_plan.md`（阶段计划）、`progress.md`（进度记录）。
 
 ---
@@ -128,9 +128,9 @@
 - `service/requestsnapshot` 使用 HKDF-SHA256 域分离派生 AES-256-GCM 密钥，随机 nonce，AAD 绑定 request id 与相对文件名；目录 `0700`、文件 `0600`、同目录临时文件 + rename 原子写入，安全哈希文件名和节点目录名防路径穿越。
 - 元数据和访问审计只写主数据库：`RequestSnapshot` / `RequestSnapshotAccess` 同时注册普通/快速迁移；正文仅存在节点本地加密文件中，不进入日志列表、主库字段或日志库/ClickHouse。
 - 容量与生命周期：单体/节点总容量限制；每节点独立清理循环；按 retention 再 capacity 的确定性 oldest-first 删除；孤儿文件/缺失文件对账；失败、missing、tombstone、access 记录均按保留期有界清理；设置值带上下界和溢出保护。
-- 权限链路：专用 `request_snapshot.read`，无默认 admin grant（root 仍按系统惯例隐式允许）；路由为 `AdminAuth + CriticalRateLimit + DisableCache + RequirePermission`；2FA/Passkey 均可签发同 scope 的 proof。
-- 每个 permission 通过后的成功/失败读取尝试写独立审计；成功内容读取在审计存储可用且成功审计落库前绝不返回正文；通用 I/O/DB 错误仅返回稳定安全码，不暴露本地路径。
-- 前端：Usage Log 详情仅在 admin、存在 request id 且具备专用权限时显示按需按钮；点击后进行 2FA/Passkey 验证，正文仅保存在组件内存并在关闭时清除，支持滚动全文、复制和原始字节下载；Operations > Log Maintenance 提供默认关闭的设置表单。
+- 权限链路：请求体内容不可委派给普通管理员，仅 Root 超级管理员可读；路由为 `RootAuth + CriticalRateLimit + DisableCache`，读取不再要求 2FA/Passkey proof。
+- 每个 Root 授权后的成功/失败读取尝试写独立审计；成功内容读取在审计存储可用且成功审计落库前绝不返回正文；通用 I/O/DB 错误仅返回稳定安全码，不暴露本地路径。
+- 前端：Usage Log 详情仅在 Root 超级管理员且存在 request id 时显示按需按钮；点击后直接读取，正文仅保存在组件内存并在关闭、切换日志或迟到响应时清除，支持滚动全文、复制和原始字节下载；System Settings > Operations > Request Snapshots 提供独立的默认关闭设置页面。
 - i18n：新增文案通过 `web/scripts/add-missing-keys.mjs` 写入七种 locale，随后执行 `bun run i18n:sync`；报告为全 locale `0 missing / 0 extras / 0 untranslated`。
 
 验证：request snapshot/authz/settings/controller focused Go tests、model/middleware tests、`go build ./...`、11 个 focused Bun tests、`bun run typecheck`、受影响文件 oxlint、`relaykit` `GOWORK=off go build ./...`、`git diff --check` 均通过；无 staged 文件。独立 security/lifecycle/authz/frontend/oracle review 后修复了 proof scope 不可签发、成功审计未 fail-closed、failed/missing 行无界、no-store/rate limit、通用错误泄露路径及设置溢出等问题。
@@ -253,6 +253,7 @@ bun run knip                          # 可选：检查未使用依赖/导出
 ## 8. 当前 git 状态快照
 
 - 分支：`rebuild/customizations-20260812`
-- 产品提交：`da678d51`（`feat: rebuild customizations on latest upstream`）
-- 部署：`ssh2` 的 `newapi` 容器正在运行镜像 `newapi-custom:20260814-remediated-da678d51`，`/api/status` 为 200，部署前 SQLite 备份完整性检查通过。
-- 未 push。尚未提交的内容仅为本地 Agent/Trellis 运行时、任务元数据及本文档批次（具体清单以 `git status` 为准）。
+- 产品提交：`bd8b8746`（`feat: restore admin observability UX`）；前序完整重建提交为 `da678d51`。
+- 部署：2026-08-15 04:25 +08:00，`ssh2` 的 `newapi` 容器正在运行镜像 `newapi-custom:20260815-observability-bd8b8746`，镜像 ID 为 `sha256:bc3a6c51743b88aca6909bbb9d66a063eda666e2331752b7ca4dfd7cf786a794`；容器运行、重启次数 0，`/api/status` 和首页均为 HTTP 200。
+- 部署前 SQLite 备份完整性为 `ok`，备份目录：`/opt/newapi/backups/deploy-20260815-042500-bd8b8746`。
+- 分支已推送并跟踪 `origin/rebuild/customizations-20260812`。未纳入发布的本地 Agent/Trellis 运行时、任务元数据及 `nul` 仍保留在工作区，具体清单以 `git status` 为准。
