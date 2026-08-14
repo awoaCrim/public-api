@@ -41,6 +41,77 @@ func (l *InMemoryRateLimiter) clearExpiredItems() {
 	}
 }
 
+type InMemoryRateLimitReservation struct {
+	limiter   *InMemoryRateLimiter
+	key       string
+	timestamp int64
+	released  bool
+	mutex     sync.Mutex
+}
+
+func (r *InMemoryRateLimitReservation) Release() {
+	if r == nil || r.limiter == nil {
+		return
+	}
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	if r.released {
+		return
+	}
+	r.limiter.mutex.Lock()
+	defer r.limiter.mutex.Unlock()
+	queue, ok := r.limiter.store[r.key]
+	if !ok {
+		r.released = true
+		return
+	}
+	for index, timestamp := range *queue {
+		if timestamp != r.timestamp {
+			continue
+		}
+		*queue = append((*queue)[:index], (*queue)[index+1:]...)
+		break
+	}
+	if len(*queue) == 0 {
+		delete(r.limiter.store, r.key)
+	}
+	r.released = true
+}
+
+func (l *InMemoryRateLimiter) Reserve(key string, maxRequestNum int, duration int64) (bool, *InMemoryRateLimitReservation, int) {
+	if maxRequestNum <= 0 || duration <= 0 {
+		return true, nil, 0
+	}
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	queue, ok := l.store[key]
+	now := time.Now().UnixNano()
+	cutoff := now - duration*int64(time.Second)
+	if !ok {
+		values := make([]int64, 0, maxRequestNum)
+		queue = &values
+		l.store[key] = queue
+	}
+	firstActive := 0
+	for firstActive < len(*queue) && (*queue)[firstActive] <= cutoff {
+		firstActive++
+	}
+	if firstActive > 0 {
+		*queue = append((*queue)[:0], (*queue)[firstActive:]...)
+	}
+	if len(*queue) >= maxRequestNum {
+		return false, nil, len(*queue) + 1
+	}
+	*queue = append(*queue, now)
+	return true, &InMemoryRateLimitReservation{limiter: l, key: key, timestamp: now}, len(*queue)
+}
+
+func (l *InMemoryRateLimiter) Delete(key string) {
+	l.mutex.Lock()
+	delete(l.store, key)
+	l.mutex.Unlock()
+}
+
 // Request parameter duration's unit is seconds
 func (l *InMemoryRateLimiter) Request(key string, maxRequestNum int, duration int64) bool {
 	l.mutex.Lock()

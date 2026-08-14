@@ -56,6 +56,19 @@ const (
 	RelayModeAlphaSearch
 )
 
+// IsTextTokenLimitMode reports whether a relay mode carries token-based text
+// content eligible for the input-token preflight hard limit and postflight
+// review triggers. Non-text modes (embeddings, images, audio, rerank, ...)
+// are excluded so estimator limits never reject media requests.
+func IsTextTokenLimitMode(mode int) bool {
+	switch mode {
+	case RelayModeChatCompletions, RelayModeCompletions, RelayModeResponses, RelayModeResponsesCompact:
+		return true
+	default:
+		return false
+	}
+}
+
 func Path2RelayMode(path string) int {
 	relayMode := RelayModeUnknown
 	if strings.HasPrefix(path, "/v1/chat/completions") || strings.HasPrefix(path, "/pg/chat/completions") {

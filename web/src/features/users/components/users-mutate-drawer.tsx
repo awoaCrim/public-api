@@ -31,6 +31,7 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -384,6 +385,31 @@ export function UsersMutateDrawer({
                             </SelectGroup>
                           </SelectContent>
                         </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='extra_group_keys'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Model Access Groups')}</FormLabel>
+                        <MultiSelect
+                          options={groups.map((group) => ({
+                            value: group,
+                            label: group,
+                          }))}
+                          selected={field.value}
+                          onChange={field.onChange}
+                          placeholder={t('Extra groups granted to this user')}
+                        />
+                        <FormDescription>
+                          {t(
+                            'Extra original groups granted to this user on top of the account tier.'
+                          )}
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}

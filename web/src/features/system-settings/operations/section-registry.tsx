@@ -22,6 +22,7 @@ import { MonitoringSettingsSection } from '../integrations/monitoring-settings-s
 import { WorkerSettingsSection } from '../integrations/worker-settings-section'
 import { LogSettingsSection } from '../maintenance/log-settings-section'
 import { PerformanceSection } from '../maintenance/performance-section'
+import { RequestSnapshotSettingsSection } from '../maintenance/request-snapshot-settings-section'
 import { UpdateCheckerSection } from '../maintenance/update-checker-section'
 import type { OperationsSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
@@ -96,9 +97,30 @@ const OPERATIONS_SECTIONS = [
     id: 'logs',
     titleKey: 'Log Maintenance',
     build: (settings: OperationsSettings) => (
-      <LogSettingsSection
-        defaultEnabled={Boolean(settings.LogConsumeEnabled)}
-      />
+      <>
+        <LogSettingsSection
+          defaultEnabled={Boolean(settings.LogConsumeEnabled)}
+        />
+        <RequestSnapshotSettingsSection
+          defaultValues={{
+            'request_snapshot_setting.enabled':
+              settings['request_snapshot_setting.enabled'] ?? false,
+            'request_snapshot_setting.storage_path':
+              settings['request_snapshot_setting.storage_path'] ??
+              './request_snapshots',
+            'request_snapshot_setting.max_body_mb':
+              settings['request_snapshot_setting.max_body_mb'] ?? 10,
+            'request_snapshot_setting.max_total_mb':
+              settings['request_snapshot_setting.max_total_mb'] ?? 1024,
+            'request_snapshot_setting.retention_days':
+              settings['request_snapshot_setting.retention_days'] ?? 30,
+            'request_snapshot_setting.cleanup_interval_hours':
+              settings['request_snapshot_setting.cleanup_interval_hours'] ?? 24,
+            'request_snapshot_setting.orphan_grace_minutes':
+              settings['request_snapshot_setting.orphan_grace_minutes'] ?? 60,
+          }}
+        />
+      </>
     ),
   },
   {

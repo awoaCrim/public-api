@@ -24,6 +24,7 @@ import type {
   UserProfile,
   UpdateUserRequest,
   UpdateUserSettingsRequest,
+  UpdateUserVisionSettingRequest,
   DeleteAccountRequest,
   CheckinStatusResponse,
   CheckinResponse,
@@ -60,6 +61,16 @@ export async function updateUserSettings(
   data: UpdateUserSettingsRequest
 ): Promise<ApiResponse> {
   const res = await api.put('/api/user/setting', data)
+  return res.data
+}
+
+/**
+ * Update only the current user's Vision interception settings.
+ */
+export async function updateUserVisionSettings(
+  data: UpdateUserVisionSettingRequest
+): Promise<ApiResponse> {
+  const res = await api.put('/api/user/setting/vision', data)
   return res.data
 }
 

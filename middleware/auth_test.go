@@ -73,15 +73,50 @@ func tamperDashboardToken(token string) string {
 	return token[:tamperAt] + replacement + token[tamperAt+1:]
 }
 
-func createMiddlewarePATUser(t *testing.T, username, token string) *model.User {
+func createMiddlewarePATUserWithRole(t *testing.T, username, token string, role int) *model.User {
 	t.Helper()
 	user := &model.User{
-		Username: username, Password: "password-placeholder", Role: common.RoleCommonUser,
+		Username: username, Password: "password-placeholder", Role: role,
 		Status: common.UserStatusEnabled, Group: "default", AccessToken: &token, AuthVersion: 1,
 		AffCode: "middleware-aff-" + username,
 	}
 	require.NoError(t, model.DB.Create(user).Error)
 	return user
+}
+
+func createMiddlewarePATUser(t *testing.T, username, token string) *model.User {
+	t.Helper()
+	return createMiddlewarePATUserWithRole(t, username, token, common.RoleCommonUser)
+}
+
+func TestRootAuthRequiresRootRole(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	createMiddlewarePATUserWithRole(t, "admin-user", "admin-pat", common.RoleAdminUser)
+	rootUser := createMiddlewarePATUserWithRole(t, "root-user", "root-pat", common.RoleRootUser)
+	router := gin.New()
+	router.GET("/root", RootAuth(), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"id": c.GetInt("id")})
+	})
+
+	adminRequest := httptest.NewRequest(http.MethodGet, "/root", nil)
+	adminRequest.Header.Set("Authorization", "Bearer admin-pat")
+	adminResponse := httptest.NewRecorder()
+	router.ServeHTTP(adminResponse, adminRequest)
+
+	assert.Equal(t, http.StatusForbidden, adminResponse.Code)
+	assert.Contains(t, adminResponse.Body.String(), "AUTH_INSUFFICIENT_PRIVILEGE")
+
+	rootRequest := httptest.NewRequest(http.MethodGet, "/root", nil)
+	rootRequest.Header.Set("Authorization", "Bearer root-pat")
+	rootResponse := httptest.NewRecorder()
+	router.ServeHTTP(rootResponse, rootRequest)
+
+	assert.Equal(t, http.StatusOK, rootResponse.Code)
+	var body struct {
+		ID int `json:"id"`
+	}
+	require.NoError(t, common.Unmarshal(rootResponse.Body.Bytes(), &body))
+	assert.Equal(t, rootUser.Id, body.ID)
 }
 
 func TestUserAuthAllowsOpaqueDottedPAT(t *testing.T) {

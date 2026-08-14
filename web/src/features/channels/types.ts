@@ -34,6 +34,22 @@ export const channelInfoSchema = z.object({
 
 export type ChannelInfo = z.infer<typeof channelInfoSchema>
 
+export const channelModelGroupModeSchema = z.enum([
+  'inherit',
+  'custom',
+  'disabled',
+])
+export type ChannelModelGroupMode = z.infer<typeof channelModelGroupModeSchema>
+
+export const channelModelGroupModeInputSchema = z.object({
+  model: z.string(),
+  mode: channelModelGroupModeSchema,
+  groups: z.array(z.string()),
+})
+export type ChannelModelGroupModeInput = z.infer<
+  typeof channelModelGroupModeInputSchema
+>
+
 export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
@@ -54,6 +70,7 @@ export const channelSchema = z.object({
   group: z.string().default('default'),
   used_quota: z.number().default(0),
   model_mapping: z.string().nullish(),
+  model_group_modes: z.array(channelModelGroupModeInputSchema).nullish(),
   status_code_mapping: z.string().nullish(),
   priority: z.number().nullish(),
   auto_ban: z.number().nullish(),
@@ -331,6 +348,7 @@ export interface TagOperationParams {
   priority?: number
   weight?: number
   model_mapping?: string
+  model_group_modes?: ChannelModelGroupModeInput[]
   models?: string
   groups?: string
 }
@@ -348,6 +366,7 @@ export interface ChannelFormData {
   models: string
   group: string
   model_mapping?: string
+  model_group_modes?: ChannelModelGroupModeInput[]
   priority?: number
   weight?: number
   test_model?: string

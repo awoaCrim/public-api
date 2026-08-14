@@ -21,9 +21,11 @@ import (
 )
 
 const (
-	securityProofScopeChannelKeyRead  = "channel.key.read"
-	securityProofScopePasskeyRegister = "passkey.register"
-	securityProofScopePasskeyDelete   = "passkey.delete"
+	securityProofScopeChannelKeyRead      = "channel.key.read"
+	securityProofScopePasskeyRegister     = "passkey.register"
+	securityProofScopePasskeyDelete       = "passkey.delete"
+	securityProofScopeRequestSnapshotRead = "request_snapshot.read"
+	securityProofScopeLLMReviewRead       = "llm_review.read"
 )
 
 type passkeyFinishRequest struct {

@@ -56,6 +56,13 @@ const defaultOperationsSettings: OperationsSettings = {
   'perf_metrics_setting.flush_interval': 5,
   'perf_metrics_setting.bucket_time': 'hour',
   'perf_metrics_setting.retention_days': 0,
+  'request_snapshot_setting.enabled': false,
+  'request_snapshot_setting.storage_path': './request_snapshots',
+  'request_snapshot_setting.max_body_mb': 10,
+  'request_snapshot_setting.max_total_mb': 1024,
+  'request_snapshot_setting.retention_days': 30,
+  'request_snapshot_setting.cleanup_interval_hours': 24,
+  'request_snapshot_setting.orphan_grace_minutes': 60,
 }
 
 export function OperationsSettings() {

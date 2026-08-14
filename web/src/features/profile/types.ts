@@ -88,6 +88,14 @@ export interface UserProfile {
  */
 export type NotifyType = 'email' | 'webhook' | 'bark' | 'gotify'
 
+export interface UserVisionSetting {
+  enabled: boolean
+  vision_model?: string
+  vision_suffix?: string
+  prompt_template?: string
+  phash_threshold?: number
+}
+
 /**
  * Parsed user settings
  */
@@ -118,6 +126,8 @@ export interface UserSettings {
   upstream_model_update_notify_enabled?: boolean
   /** Preferred interface/API response language */
   language?: string
+  /** Vision interception configuration */
+  vision?: UserVisionSetting
 }
 
 /**
@@ -145,6 +155,12 @@ export interface UpdateUserSettingsRequest {
   accept_unset_model_ratio_model?: boolean
   record_ip_log?: boolean
   upstream_model_update_notify_enabled?: boolean
+  /** Vision interception configuration */
+  vision?: UserVisionSetting
+}
+
+export interface UpdateUserVisionSettingRequest {
+  vision: UserVisionSetting
 }
 
 /**

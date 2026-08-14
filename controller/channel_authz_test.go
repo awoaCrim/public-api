@@ -69,6 +69,27 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"priority": 10}))
 	})
 
+	t.Run("model group modes change is sensitive", func(t *testing.T) {
+		updated := PatchChannel{Channel: *origin}
+		modes := []model.ChannelModelGroupModeInput{{Model: "gpt-4o", Mode: model.ChannelModelGroupModeDisabled}}
+		updated.ModelGroupModes = &modes
+
+		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{
+			"model_group_modes": modes,
+		}))
+	})
+
+	t.Run("identical model group modes are not a change", func(t *testing.T) {
+		modes := []model.ChannelModelGroupModeInput{{Model: "gpt-4o", Mode: model.ChannelModelGroupModeCustom, Groups: []string{"vip"}}}
+		originWithModes := *origin
+		originWithModes.ModelGroupModes = &modes
+		updated := PatchChannel{Channel: originWithModes}
+
+		assert.False(t, channelHasSensitiveChanges(&updated, &originWithModes, map[string]any{
+			"model_group_modes": modes,
+		}))
+	})
+
 	t.Run("unknown field fails closed", func(t *testing.T) {
 		updated := PatchChannel{Channel: *origin}
 

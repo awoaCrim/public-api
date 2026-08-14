@@ -25,6 +25,11 @@ type passkeyTestBody struct {
 
 func (*passkeyTestBody) Close() error { return nil }
 
+func TestRequestSnapshotSecurityProofScopeIsAllowed(t *testing.T) {
+	assert.True(t, isAllowedSecurityProofScope(securityProofScopeRequestSnapshotRead))
+	assert.False(t, isAllowedSecurityProofScope("request_snapshot.write"))
+}
+
 func TestParsePasskeyFinishRequestDoesNotRewriteRequestBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	bodyText := `{"flow_token":"flow-1","credential":{"id":"credential-1"}}`

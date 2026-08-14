@@ -29,6 +29,7 @@ import (
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/service/requestsnapshot"
 	_ "github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
@@ -111,6 +112,12 @@ func main() {
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
 	go authz.StartPolicySync(common.SyncFrequency)
 
+	// Request snapshot maintenance runs on every node (each node owns its own
+	// snapshot files), not under a master-only lease. The loop stops when the
+	// shutdown signal is received below.
+	snapshotCtx, stopSnapshotLoop := context.WithCancel(context.Background())
+	requestsnapshot.StartCleanupLoop(snapshotCtx)
+
 	// 数据看板
 	go model.UpdateQuotaData()
 
@@ -150,6 +157,11 @@ func main() {
 	// switch are enforced inside the runner and each handler's Enabled().
 	controller.RegisterScheduledSystemTasks()
 	service.StartSystemTaskRunner()
+
+	// LLM compliance review worker: master-only polling loop that claims,
+	// retries and completes persisted review tasks. It is a no-op while the
+	// review master switch is off.
+	service.StartLLMReviewWorker()
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true
@@ -223,6 +235,14 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
 	common.SysLog(fmt.Sprintf("received signal: %v, shutting down...", sig))
+
+	// Stop the node-local request snapshot cleanup loop.
+	stopSnapshotLoop()
+
+	// Stop the LLM review worker from claiming new tasks and wait for
+	// in-flight reviews. Unfinished reviewing tasks are recovered as pending
+	// by the next worker start.
+	service.StopLLMReviewWorker()
 
 	// SSE streams may run for minutes; give them time to finish before forced exit
 	shutdownTimeout := time.Duration(common.GetEnvOrDefault("SHUTDOWN_TIMEOUT_SECONDS", 120)) * time.Second
@@ -323,6 +343,15 @@ func InitResources() error {
 		}
 	}
 	model.InitOptionMap()
+
+	// 旧 routing_groups 兼容迁移的只读 readiness 诊断：存在活跃未映射旧引用时
+	// 记录结构化告警，不阻塞启动，不写数据。迁移本身经 root-only API 执行
+	// （先 preview 后 run，fail-closed）。
+	if ready, blockers, readinessErr := service.RoutingGroupMigrationReadiness(); readinessErr != nil {
+		common.SysLog("routing group migration readiness check failed: " + readinessErr.Error())
+	} else if !ready {
+		common.SysLog(fmt.Sprintf("routing group compatibility migration blockers present: %v", blockers))
+	}
 
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()

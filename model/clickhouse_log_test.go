@@ -83,6 +83,11 @@ func TestClickHouseLogCreateTableSQL(t *testing.T) {
 	assert.Contains(t, withoutTTL, "ENGINE = MergeTree()")
 	assert.Contains(t, withoutTTL, "PARTITION BY toYYYYMM(toDateTime(created_at))")
 	assert.Contains(t, withoutTTL, "ORDER BY (created_at, request_id)")
+	assert.Contains(t, withoutTTL, "cache_read_tokens Int32 DEFAULT 0")
+	assert.Contains(t, withoutTTL, "cache_write_tokens Int32 DEFAULT 0")
+	assert.Contains(t, withoutTTL, "cache_write_tokens_5m Int32 DEFAULT 0")
+	assert.Contains(t, withoutTTL, "cache_write_tokens_1h Int32 DEFAULT 0")
+	assert.Contains(t, withoutTTL, "input_tokens_total Int32 DEFAULT 0")
 	assert.NotContains(t, withoutTTL, "TTL ")
 
 	withTTL := clickHouseLogCreateTableSQL(30)

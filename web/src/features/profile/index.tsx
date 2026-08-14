@@ -33,6 +33,7 @@ import { ProfileSecurityCard } from './components/profile-security-card'
 import { ProfileSettingsCard } from './components/profile-settings-card'
 import { SidebarModulesCard } from './components/sidebar-modules-card'
 import { TwoFACard } from './components/two-fa-card'
+import { VisionInterceptionCard } from './components/vision-interception-card'
 import { useProfile } from './hooks'
 
 export function Profile() {
@@ -64,6 +65,10 @@ export function Profile() {
                   onProfileUpdate={refreshProfile}
                 />
                 <LanguagePreferencesCard
+                  profile={profile}
+                  onProfileUpdate={refreshProfile}
+                />
+                <VisionInterceptionCard
                   profile={profile}
                   onProfileUpdate={refreshProfile}
                 />

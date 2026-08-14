@@ -57,6 +57,14 @@ func TestMain(m *testing.M) {
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&IPBlacklist{},
+		&LLMReviewTask{},
+		&LLMReviewAttempt{},
+		&LLMReviewGrace{},
+		&LLMReviewCalibration{},
+		&UserGroupGrant{},
+		&ChannelModelGroupOverride{},
+		&ChannelModelGroupDisabled{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -89,6 +97,14 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM system_instances")
 		DB.Exec("DELETE FROM system_task_locks")
 		DB.Exec("DELETE FROM system_tasks")
+		DB.Exec("DELETE FROM ip_blacklists")
+		DB.Exec("DELETE FROM llm_review_tasks")
+		DB.Exec("DELETE FROM llm_review_attempts")
+		DB.Exec("DELETE FROM llm_review_graces")
+		DB.Exec("DELETE FROM llm_review_calibrations")
+		DB.Exec("DELETE FROM user_group_grants")
+		DB.Exec("DELETE FROM channel_model_group_overrides")
+		DB.Exec("DELETE FROM channel_model_group_disabled")
 	})
 }
 

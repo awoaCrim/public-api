@@ -1,6 +1,21 @@
 package common
 
-import "net"
+import (
+	"net"
+	"strings"
+)
+
+func NormalizeIPv4(value string) (string, bool) {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" || strings.Contains(normalized, "/") || strings.Contains(normalized, ":") {
+		return "", false
+	}
+	ip := net.ParseIP(normalized)
+	if ip == nil || ip.To4() == nil {
+		return "", false
+	}
+	return ip.To4().String(), true
+}
 
 func IsIP(s string) bool {
 	ip := net.ParseIP(s)

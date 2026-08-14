@@ -55,6 +55,11 @@ type Channel struct {
 
 	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
 
+	// ModelGroupModes carries the per-model group tri-state policies on save
+	// and load. nil leaves existing policies untouched; an explicit (even
+	// empty) slice replaces them. Never persisted on the channel row itself.
+	ModelGroupModes *[]ChannelModelGroupModeInput `json:"model_group_modes,omitempty" gorm:"-:all"`
+
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
 }
@@ -430,7 +435,29 @@ func GetChannelById(id int, selectAll bool) (*Channel, error) {
 	if err != nil {
 		return nil, err
 	}
+	if modes, loadErr := LoadChannelModelGroupModes(channel.Id); loadErr == nil && len(modes) > 0 {
+		channel.ModelGroupModes = &modes
+	} else if loadErr != nil {
+		return nil, loadErr
+	}
 	return channel, nil
+}
+
+// replaceChannelModelGroupModesInTx validates and persists the channel's
+// model-group tri-state inside the caller's transaction. A nil slice keeps
+// the existing policies untouched.
+func replaceChannelModelGroupModesInTx(tx *gorm.DB, channel *Channel) error {
+	if channel == nil || channel.ModelGroupModes == nil {
+		return nil
+	}
+	published := make(map[string]struct{})
+	for _, model := range channel.GetModels() {
+		model = strings.TrimSpace(model)
+		if model != "" {
+			published[model] = struct{}{}
+		}
+	}
+	return ReplaceChannelModelGroupPolicies(tx, channel.Id, *channel.ModelGroupModes, published)
 }
 
 func BatchInsertChannels(channels []Channel) error {
@@ -453,6 +480,10 @@ func BatchInsertChannels(channels []Channel) error {
 			return err
 		}
 		for _, channel_ := range chunk {
+			if err := replaceChannelModelGroupModesInTx(tx, &channel_); err != nil {
+				tx.Rollback()
+				return err
+			}
 			if err := channel_.AddAbilities(tx); err != nil {
 				tx.Rollback()
 				return err
@@ -482,6 +513,18 @@ func BatchDeleteChannels(ids []int) (int64, error) {
 		if err := tx.Where("channel_id in (?)", chunk).Delete(&Ability{}).Error; err != nil {
 			tx.Rollback()
 			return 0, err
+		}
+		if tx.Migrator().HasTable(&ChannelModelGroupOverride{}) {
+			if err := tx.Where("channel_id in (?)", chunk).Delete(&ChannelModelGroupOverride{}).Error; err != nil {
+				tx.Rollback()
+				return 0, err
+			}
+		}
+		if tx.Migrator().HasTable(&ChannelModelGroupDisabled{}) {
+			if err := tx.Where("channel_id in (?)", chunk).Delete(&ChannelModelGroupDisabled{}).Error; err != nil {
+				tx.Rollback()
+				return 0, err
+			}
 		}
 	}
 	if err := tx.Commit().Error; err != nil {
@@ -530,13 +573,15 @@ func (channel *Channel) GetStatusCodeMapping() string {
 }
 
 func (channel *Channel) Insert() error {
-	var err error
-	err = DB.Create(channel).Error
-	if err != nil {
-		return err
-	}
-	err = channel.AddAbilities(nil)
-	return err
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(channel).Error; err != nil {
+			return err
+		}
+		if err := replaceChannelModelGroupModesInTx(tx, channel); err != nil {
+			return err
+		}
+		return channel.AddAbilities(tx)
+	})
 }
 
 func (channel *Channel) Update() error {
@@ -578,14 +623,18 @@ func (channel *Channel) Update() error {
 			}
 		}
 	}
-	var err error
-	err = DB.Model(channel).Updates(channel).Error
-	if err != nil {
-		return err
-	}
-	DB.Model(channel).First(channel, "id = ?", channel.Id)
-	err = channel.UpdateAbilities(nil)
-	return err
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(channel).Updates(channel).Error; err != nil {
+			return err
+		}
+		if err := replaceChannelModelGroupModesInTx(tx, channel); err != nil {
+			return err
+		}
+		if err := tx.Model(channel).First(channel, "id = ?", channel.Id).Error; err != nil {
+			return err
+		}
+		return channel.UpdateAbilities(tx)
+	})
 }
 
 func (channel *Channel) UpdateResponseTime(responseTime int64) {
@@ -609,13 +658,15 @@ func (channel *Channel) UpdateBalance(balance float64) {
 }
 
 func (channel *Channel) Delete() error {
-	var err error
-	err = DB.Delete(channel).Error
-	if err != nil {
-		return err
-	}
-	err = channel.DeleteAbilities()
-	return err
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(channel).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error; err != nil {
+			return err
+		}
+		return DeleteChannelModelGroupPolicies(tx, channel.Id)
+	})
 }
 
 var channelStatusLock sync.Mutex

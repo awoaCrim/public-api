@@ -365,6 +365,13 @@ export type OperationsSettings = {
   'perf_metrics_setting.flush_interval': number
   'perf_metrics_setting.bucket_time': 'hour' | 'minute' | '5min'
   'perf_metrics_setting.retention_days': number
+  'request_snapshot_setting.enabled': boolean
+  'request_snapshot_setting.storage_path': string
+  'request_snapshot_setting.max_body_mb': number
+  'request_snapshot_setting.max_total_mb': number
+  'request_snapshot_setting.retention_days': number
+  'request_snapshot_setting.cleanup_interval_hours': number
+  'request_snapshot_setting.orphan_grace_minutes': number
 }
 
 export type SecuritySettings = {

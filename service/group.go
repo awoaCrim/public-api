@@ -69,14 +69,22 @@ func GetUserAutoGroup(userGroup string) []string {
 	return autoGroups
 }
 
-// FilterUserTokenAutoGroups applies current permissions before the current
-// per-token limit. It intentionally does not fall back to the global Auto list.
-func FilterUserTokenAutoGroups(userGroup string, groups []string) []string {
+// FilterUserTokenAutoGroups applies the user's current effective permission
+// set (account-tier groups plus active extra grants when a user id is
+// available) before the per-token limit. It intentionally does not fall back
+// to the global Auto list when the token carries an explicit snapshot.
+func FilterUserTokenAutoGroups(c *gin.Context, userGroup string, groups []string) []string {
+	effective := GetUserUsableGroups(userGroup)
+	if c != nil && c.GetInt("id") > 0 {
+		if byUser, err := GetUserEffectiveGroups(c.GetInt("id")); err == nil {
+			effective = byUser
+		}
+	}
 	maxCount := setting.GetMaxTokenAutoGroups()
 	filtered := make([]string, 0, min(len(groups), maxCount))
 	seen := make(map[string]struct{})
 	for _, group := range groups {
-		if !IsUserSelectableGroup(userGroup, group) {
+		if _, ok := effective[group]; !ok {
 			continue
 		}
 		if _, ok := seen[group]; ok {
@@ -93,17 +101,23 @@ func FilterUserTokenAutoGroups(userGroup string, groups []string) []string {
 
 // GetRequestAutoGroups resolves the ordered Auto groups for the current token.
 // The absence of the context value means that the token inherits the complete
-// global Auto list; a present (even empty) value is an explicit token snapshot.
+// effective Auto list; a present (even empty) value is an explicit token
+// snapshot filtered by the user's current permissions.
 func GetRequestAutoGroups(c *gin.Context, userGroup string) []string {
 	value, ok := common.GetContextKey(c, constant.ContextKeyTokenAutoGroups)
 	if !ok {
+		if c != nil && c.GetInt("id") > 0 {
+			if groups, err := GetUserAutoGroupByID(c.GetInt("id")); err == nil {
+				return groups
+			}
+		}
 		return GetUserAutoGroup(userGroup)
 	}
 	groups, ok := value.([]string)
 	if !ok {
 		return []string{}
 	}
-	return FilterUserTokenAutoGroups(userGroup, groups)
+	return FilterUserTokenAutoGroups(c, userGroup, groups)
 }
 
 // GetGroupsEnabledModels 按 groups 顺序获取各分组启用的模型并去重

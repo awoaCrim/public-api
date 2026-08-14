@@ -119,6 +119,16 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var usage = &dto.Usage{}
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+	// Some OpenAI-compatible upstreams put the billable usage on a non-final
+	// SSE chunk (e.g. a finish chunk followed by empty trailing chunks).
+	// lastStreamUsage holds the latest chunk whose normalized usage has
+	// billable totals; streamUsageMerge accumulates cache/detail fields from
+	// every usage-bearing chunk so fields split across chunks are not lost;
+	// usageStreamData is the chunk that carried lastStreamUsage and is used as
+	// the post-processing body for cache extraction.
+	var lastStreamUsage *dto.Usage
+	var streamUsageMerge *dto.Usage
+	var usageStreamData string
 	seenStreamToolCalls := make(map[string]struct{})
 	var streamFunctionCallNames []string
 
@@ -144,23 +154,39 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 				logger.LogError(c, "error processing stream token data: "+err.Error())
 				sr.Error(err)
 			}
+			if u := extractStreamUsage(data); u != nil {
+				if streamUsageMerge == nil {
+					streamUsageMerge = u
+				} else {
+					mergeUsageDetails(streamUsageMerge, u)
+				}
+				if service.ValidUsage(u) {
+					lastStreamUsage = u
+					usageStreamData = data
+				}
+			}
 		}
 	})
 
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
-		var streamResp struct {
-			Usage *dto.Usage `json:"usage"`
-		}
-		err := common.Unmarshal([]byte(secondLastStreamData), &streamResp)
-		if err == nil && streamResp.Usage != nil && service.ValidUsage(streamResp.Usage) {
-			usage = streamResp.Usage
-			containStreamUsage = true
+		if u := extractStreamUsage(secondLastStreamData); u != nil {
+			if streamUsageMerge == nil {
+				streamUsageMerge = u
+			} else {
+				mergeUsageDetails(streamUsageMerge, u)
+			}
+			if service.ValidUsage(u) {
+				usage = u
+				containStreamUsage = true
+				lastStreamUsage = u
+				usageStreamData = secondLastStreamData
 
-			if common.DebugEnabled {
-				logger.LogDebug(c, "Audio model usage extracted from second last SSE: PromptTokens=%d, CompletionTokens=%d, TotalTokens=%d, InputTokens=%d, OutputTokens=%d",
-					usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens,
-					usage.InputTokens, usage.OutputTokens)
+				if common.DebugEnabled {
+					logger.LogDebug(c, "Audio model usage extracted from second last SSE: PromptTokens=%d, CompletionTokens=%d, TotalTokens=%d, InputTokens=%d, OutputTokens=%d",
+						usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens,
+						usage.InputTokens, usage.OutputTokens)
+				}
 			}
 		}
 	}
@@ -170,6 +196,18 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	if err := handleLastResponse(lastStreamData, &responseId, &createAt, &systemFingerprint, &model, &usage,
 		&containStreamUsage, info, &shouldSendLastResp); err != nil {
 		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
+	}
+
+	// Prefer usage captured from any stream chunk when the final chunk carried
+	// none, so trailing empty chunks never fall back to a local estimate.
+	if !containStreamUsage && lastStreamUsage != nil {
+		usage = lastStreamUsage
+		containStreamUsage = true
+	}
+	// Fill cache/detail fields that arrived on a different chunk than the
+	// totals, keeping the last valid usage's non-zero standard values.
+	if containStreamUsage && streamUsageMerge != nil {
+		mergeUsageDetails(usage, streamUsageMerge)
 	}
 
 	if info.RelayFormat == types.RelayFormatOpenAI {
@@ -183,7 +221,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		usage.CompletionTokens += toolCount * 7
 	}
 
-	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
+	// Post-process against the chunk that actually carried usage when available.
+	postBody := lastStreamData
+	if usageStreamData != "" {
+		postBody = usageStreamData
+	}
+	applyUsagePostProcessing(info, usage, common.StringToByteSlice(postBody))
 
 	for _, name := range streamFunctionCallNames {
 		info.CountBillableToolCall(dto.BuildInCallFunctionCall, name)
@@ -270,6 +313,12 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	if info.ChannelSetting.ForceFormat {
 		forceFormat = true
 	}
+
+	// Normalize alternate input_tokens/output_tokens usage before the local
+	// estimate branch, so real upstream totals are not overwritten by the
+	// estimate; only truly missing canonical prompt/completion totals trigger
+	// estimation.
+	normalizeOpenAICompatibleUsage(&simpleResponse.Usage)
 
 	usageModified := false
 	if simpleResponse.Usage.PromptTokens == 0 {

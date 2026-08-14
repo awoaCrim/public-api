@@ -95,6 +95,21 @@ func TestNewAPIChannelRegistration(t *testing.T) {
 	assert.Empty(t, constant.ChannelBaseURLs[constant.ChannelTypeNewAPI])
 }
 
+func TestOpenCodeGoChannelRegistration(t *testing.T) {
+	apiType, ok := common.ChannelType2APIType(constant.ChannelTypeOpenCodeGo)
+
+	require.True(t, ok)
+	assert.Equal(t, 59, constant.ChannelTypeSub2API)
+	assert.Equal(t, 60, constant.ChannelTypeNewAPI)
+	assert.Equal(t, 61, constant.ChannelTypeOpenCodeGo)
+	assert.Equal(t, 62, constant.ChannelTypeDummy)
+	assert.Equal(t, constant.APITypeOpenCodeGo, apiType)
+	assert.Equal(t, constant.APITypeOpenCodeGo+1, constant.APITypeDummy)
+	assert.Equal(t, "OpenCode Go", constant.GetChannelTypeName(constant.ChannelTypeOpenCodeGo))
+	require.Greater(t, len(constant.ChannelBaseURLs), constant.ChannelTypeOpenCodeGo)
+	assert.Equal(t, "https://opencode.ai", constant.ChannelBaseURLs[constant.ChannelTypeOpenCodeGo])
+}
+
 func TestResponsesCompactChannelSupport(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -130,6 +145,10 @@ func TestMultiprotocolGatewayEndpointTypes(t *testing.T) {
 
 	assert.Equal(t, want, common.GetEndpointTypesByChannelType(constant.ChannelTypeNewAPI, "gpt-5"))
 	assert.Equal(t, want, common.GetEndpointTypesByChannelType(constant.ChannelTypeSub2API, "gpt-5"))
+	assert.Equal(t, []constant.EndpointType{
+		constant.EndpointTypeOpenAI,
+		constant.EndpointTypeAnthropic,
+	}, common.GetEndpointTypesByChannelType(constant.ChannelTypeOpenCodeGo, "gpt-5"))
 }
 
 func TestCopyChannelRejectsInvalidLegacyProxySettings(t *testing.T) {

@@ -292,6 +292,16 @@ func migrateDB() error {
 		&SystemTaskLock{},
 		&CasbinRule{},
 		&AuthzRole{},
+		&RequestSnapshot{},
+		&RequestSnapshotAccess{},
+		&IPBlacklist{},
+		&LLMReviewTask{},
+		&LLMReviewAttempt{},
+		&LLMReviewGrace{},
+		&LLMReviewCalibration{},
+		&UserGroupGrant{},
+		&ChannelModelGroupOverride{},
+		&ChannelModelGroupDisabled{},
 	)
 	if err != nil {
 		return err
@@ -353,6 +363,16 @@ func migrateDBFast() error {
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
+		{&RequestSnapshot{}, "RequestSnapshot"},
+		{&RequestSnapshotAccess{}, "RequestSnapshotAccess"},
+		{&IPBlacklist{}, "IPBlacklist"},
+		{&LLMReviewTask{}, "LLMReviewTask"},
+		{&LLMReviewAttempt{}, "LLMReviewAttempt"},
+		{&LLMReviewGrace{}, "LLMReviewGrace"},
+		{&LLMReviewCalibration{}, "LLMReviewCalibration"},
+		{&UserGroupGrant{}, "UserGroupGrant"},
+		{&ChannelModelGroupOverride{}, "ChannelModelGroupOverride"},
+		{&ChannelModelGroupDisabled{}, "ChannelModelGroupDisabled"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -408,7 +428,26 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays)).Error; err != nil {
 		return err
 	}
+	if err := ensureClickHouseUsageMetricColumns(); err != nil {
+		return err
+	}
 	return syncClickHouseLogTTL(ttlDays)
+}
+
+func ensureClickHouseUsageMetricColumns() error {
+	columns := []string{
+		"cache_read_tokens Int32 DEFAULT 0",
+		"cache_write_tokens Int32 DEFAULT 0",
+		"cache_write_tokens_5m Int32 DEFAULT 0",
+		"cache_write_tokens_1h Int32 DEFAULT 0",
+		"input_tokens_total Int32 DEFAULT 0",
+	}
+	for _, column := range columns {
+		if err := LOG_DB.Exec("ALTER TABLE logs ADD COLUMN IF NOT EXISTS " + column).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func clickHouseLogTTLDays() int {
@@ -448,6 +487,11 @@ CREATE TABLE IF NOT EXISTS logs (
 	quota Int32 DEFAULT 0,
 	prompt_tokens Int32 DEFAULT 0,
 	completion_tokens Int32 DEFAULT 0,
+	cache_read_tokens Int32 DEFAULT 0,
+	cache_write_tokens Int32 DEFAULT 0,
+	cache_write_tokens_5m Int32 DEFAULT 0,
+	cache_write_tokens_1h Int32 DEFAULT 0,
+	input_tokens_total Int32 DEFAULT 0,
 	use_time Int32 DEFAULT 0,
 	is_stream UInt8 DEFAULT 0,
 	channel_id Int32 DEFAULT 0,

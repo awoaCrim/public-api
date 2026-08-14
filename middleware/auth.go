@@ -61,6 +61,9 @@ func authHelper(c *gin.Context, minRole int) {
 		return
 	}
 	setDashboardAuthContext(c, user, identity, useAccessToken)
+	if abortBlacklistedIPSessionRequest(c, user.Id, user.Role, false) {
+		return
+	}
 
 	// 管理/root 写操作审计兜底：内聚在鉴权链路里，保证任何经过 AdminAuth/RootAuth
 	// 的写接口都会自动留痕（无需在路由上单独挂审计中间件，避免漏挂）。
@@ -345,6 +348,9 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 		c.Set("id", token.UserId)
 		c.Set("token_id", token.Id)
 		c.Set("token_key", token.Key)
+		if abortBlacklistedIPSessionRequest(c, token.UserId, userCache.Role, true) {
+			return
+		}
 		c.Next()
 	}
 }
@@ -455,23 +461,35 @@ func TokenAuth() func(c *gin.Context) {
 		}
 
 		userCache.WriteContext(c)
+		c.Set("role", userCache.Role)
+		if blocked, blockErr := checkBlacklistedIPRequest(c, token.UserId, userCache.Role); blockErr != nil {
+			abortWithOpenAiMessage(c, http.StatusInternalServerError,
+				common.TranslateMessage(c, i18n.MsgDatabaseError))
+			return
+		} else if blocked {
+			abortWithOpenAiMessage(c, http.StatusForbidden, model.BlacklistedIPBanMessage, types.ErrorCodeAccessDenied)
+			return
+		}
 
 		userGroup := userCache.Group
-		tokenGroup := token.Group
-		if tokenGroup != "" {
-			// check common.UserUsableGroups[userGroup]
-			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
-				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))
-				return
-			}
-			// check group in common.GroupRatio
-			if !ratio_setting.ContainsGroupRatio(tokenGroup) {
-				if tokenGroup != "auto" {
-					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
-					return
+		selection, groupErr := service.ResolveGroupSelection(token.UserId, token.Group, "")
+		if groupErr != nil {
+			if errors.Is(groupErr, service.ErrRoutingGroupNotGranted) {
+				group := strings.TrimSpace(token.Group)
+				if group == "" {
+					group = userGroup
 				}
+				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", group), types.ErrorCodeAccessDenied)
+			} else {
+				abortWithOpenAiMessage(c, http.StatusInternalServerError, common.TranslateMessage(c, i18n.MsgDatabaseError))
 			}
-			userGroup = tokenGroup
+			return
+		}
+		userGroup = selection.TokenGroup
+		// check group in common.GroupRatio
+		if userGroup != "auto" && !model.IsRootUser(token.UserId) && !ratio_setting.ContainsGroupRatio(userGroup) {
+			abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", userGroup), types.ErrorCodeAccessDenied)
+			return
 		}
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, userGroup)
 

@@ -384,6 +384,86 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	return summary
 }
 
+func clampUsageMetric(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > common.MaxQuota {
+		return common.MaxQuota
+	}
+	return value
+}
+
+func clampUsageMetricFromInt64(value int64) int {
+	if value < 0 {
+		return 0
+	}
+	if value > int64(common.MaxQuota) {
+		return common.MaxQuota
+	}
+	return int(value)
+}
+
+func ApplyUsageMetricsToConsumeLogParams(params *model.RecordConsumeLogParams, usage *dto.Usage) {
+	if params == nil {
+		return
+	}
+	usage = effectiveBillingUsage(usage)
+	if usage == nil {
+		return
+	}
+
+	cacheReadTokens := clampUsageMetric(usage.PromptTokensDetails.CachedTokens)
+	cacheWriteTokens := usage.PromptTokensDetails.CacheCreationTokensTotal()
+	if usage.InputTokensDetails != nil {
+		if cacheReadTokens == 0 {
+			cacheReadTokens = clampUsageMetric(usage.InputTokensDetails.CachedTokens)
+		}
+		if cacheWriteTokens == 0 {
+			cacheWriteTokens = usage.InputTokensDetails.CacheCreationTokensTotal()
+		}
+	}
+
+	params.CacheReadTokens = cacheReadTokens
+	params.CacheWriteTokens = clampUsageMetric(cacheWriteTokens)
+	params.CacheWriteTokens5m = clampUsageMetric(usage.ClaudeCacheCreation5mTokens)
+	params.CacheWriteTokens1h = clampUsageMetric(usage.ClaudeCacheCreation1hTokens)
+	if splitCacheWriteTokens := int64(params.CacheWriteTokens5m) + int64(params.CacheWriteTokens1h); splitCacheWriteTokens > int64(params.CacheWriteTokens) {
+		params.CacheWriteTokens = clampUsageMetricFromInt64(splitCacheWriteTokens)
+	}
+
+	inputTokensTotal := int64(usage.PromptTokens)
+	if usage.UsageSemantic == dto.BillingUsageSemanticAnthropic {
+		inputTokensTotal += int64(cacheReadTokens) + int64(cacheWriteTokens)
+	}
+	if usage.InputTokens > 0 {
+		inputTokensTotal = int64(usage.InputTokens)
+	}
+	if inputTokensTotal > 0 {
+		params.InputTokensTotal = clampUsageMetricFromInt64(inputTokensTotal)
+	}
+}
+
+func applyUsageMetricsToConsumeLogParams(params *model.RecordConsumeLogParams, summary textQuotaSummary, usage *dto.Usage) {
+	if params == nil {
+		return
+	}
+	ApplyUsageMetricsToConsumeLogParams(params, usage)
+	params.CacheReadTokens = clampUsageMetric(summary.CacheTokens)
+	params.CacheWriteTokens = clampUsageMetric(cacheWriteTokensTotal(summary))
+	params.CacheWriteTokens5m = clampUsageMetric(summary.CacheCreationTokens5m)
+	params.CacheWriteTokens1h = clampUsageMetric(summary.CacheCreationTokens1h)
+
+	inputTokensTotal := summary.PromptTokens
+	if summary.UsageSemantic == dto.BillingUsageSemanticAnthropic {
+		inputTokensTotal += params.CacheReadTokens + params.CacheWriteTokens
+	}
+	if usage != nil && usage.InputTokens > 0 {
+		inputTokensTotal = usage.InputTokens
+	}
+	params.InputTokensTotal = clampUsageMetric(inputTokensTotal)
+}
+
 func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) string {
 	if usage != nil && usage.UsageSemantic != "" {
 		return usage.UsageSemantic
@@ -450,6 +530,52 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
+	}
+
+	// ===== Per-request token limits (postflight review, no direct bans) =====
+	// The request is already completed and charged; the response is not
+	// changed. Input/output over-limit events only asynchronously enqueue LLM
+	// compliance review; only a confirmed violation can permanently disable
+	// the account. Whitelisted models skip both the review triggers and the
+	// calibration samples.
+	banSetting := operation_setting.GetRateLimitBanSetting()
+	if banSetting.Enabled && !model.IsRootUser(relayInfo.UserId) && relayconstant.IsTextTokenLimitMode(relayInfo.RelayMode) {
+		if !operation_setting.IsModelRateLimitWhitelisted(summary.ModelName) {
+			estimate := relayInfo.GetEstimatePromptTokens()
+			if estimate > 0 && summary.PromptTokens > 0 {
+				// Calibration sample: asynchronously persisted; never blocks
+				// the billing hot path.
+				RecordInputCalibrationSample(summary.ModelName, estimate, summary.PromptTokens, banSetting.MaxInputTokens)
+			}
+			triggerBase := LLMReviewTrigger{
+				UserId:        relayInfo.UserId,
+				ModelName:     relayInfo.OriginModelName,
+				ChannelId:     relayInfo.ChannelId,
+				IsStream:      relayInfo.IsStream,
+				Stage:         LLMReviewStagePostflight,
+				EstimateInput: estimate,
+				ActualInput:   summary.PromptTokens,
+				ActualOutput:  summary.CompletionTokens,
+			}
+			var triggers []LLMReviewTrigger
+			if banSetting.MaxInputTokens > 0 && summary.PromptTokens > banSetting.MaxInputTokens {
+				t := triggerBase
+				t.TriggerType = LLMReviewTriggerInputToken
+				t.CurrentValue = summary.PromptTokens
+				t.LimitValue = banSetting.MaxInputTokens
+				triggers = append(triggers, t)
+			}
+			if banSetting.MaxOutputTokens > 0 && summary.CompletionTokens > banSetting.MaxOutputTokens {
+				t := triggerBase
+				t.TriggerType = LLMReviewTriggerOutputToken
+				t.CurrentValue = summary.CompletionTokens
+				t.LimitValue = banSetting.MaxOutputTokens
+				triggers = append(triggers, t)
+			}
+			if len(triggers) > 0 {
+				enqueueTokenPostflightReviews(ctx, triggers)
+			}
+		}
 	}
 
 	logModel := summary.ModelName
@@ -523,7 +649,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 
 	attachQuotaSaturation(ctx, relayInfo, other)
 
-	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
+	consumeLogParams := model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     summary.PromptTokens,
 		CompletionTokens: summary.CompletionTokens,
@@ -536,7 +662,9 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		IsStream:         relayInfo.IsStream,
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
-	})
+	}
+	applyUsageMetricsToConsumeLogParams(&consumeLogParams, summary, billingUsage)
+	model.RecordConsumeLog(ctx, relayInfo.UserId, consumeLogParams)
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
 	})

@@ -194,28 +194,9 @@ func filterAbilitiesByRequestPathAndModel(abilities []Ability, requestPath strin
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {
-	models_ := strings.Split(channel.Models, ",")
-	groups_ := strings.Split(channel.Group, ",")
-	abilitySet := make(map[string]struct{})
-	abilities := make([]Ability, 0, len(models_))
-	for _, model := range models_ {
-		for _, group := range groups_ {
-			key := group + "|" + model
-			if _, exists := abilitySet[key]; exists {
-				continue
-			}
-			abilitySet[key] = struct{}{}
-			ability := Ability{
-				Group:     group,
-				Model:     model,
-				ChannelId: channel.Id,
-				Enabled:   channel.Status == common.ChannelStatusEnabled,
-				Priority:  channel.Priority,
-				Weight:    uint(channel.GetWeight()),
-				Tag:       channel.Tag,
-			}
-			abilities = append(abilities, ability)
-		}
+	abilities, err := channel.buildAbilities(tx)
+	if err != nil {
+		return err
 	}
 	if len(abilities) == 0 {
 		return nil
@@ -232,6 +213,62 @@ func (channel *Channel) AddAbilities(tx *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+// channelDefaultGroups returns the trimmed channel group list without empty
+// entries or the reserved auto marker.
+func channelDefaultGroups(channel *Channel) []string {
+	groups := make([]string, 0)
+	for _, group := range channel.GetGroups() {
+		group = strings.TrimSpace(group)
+		if group != "" && group != "auto" {
+			groups = append(groups, group)
+		}
+	}
+	return groups
+}
+
+// buildAbilities computes the channel's ability projection. Each published
+// model publishes to its effective group set: disabled models publish
+// nothing, custom models publish only their own rows, and everything else
+// publishes to the channel default groups.
+func (channel *Channel) buildAbilities(tx *gorm.DB) ([]Ability, error) {
+	useDB := tx
+	if useDB == nil {
+		useDB = DB
+	}
+	hasPolicyTables := useDB != nil &&
+		useDB.Migrator().HasTable(&ChannelModelGroupOverride{})
+	models := channel.GetModels()
+	abilities := make([]Ability, 0, len(models))
+	abilitySet := make(map[string]struct{})
+	for _, modelName := range models {
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" {
+			continue
+		}
+		groups, err := resolveChannelModelGroups(useDB, channel.Id, modelName, channelDefaultGroups(channel), hasPolicyTables)
+		if err != nil {
+			return nil, err
+		}
+		for _, group := range groups {
+			key := group + "|" + modelName
+			if _, exists := abilitySet[key]; exists {
+				continue
+			}
+			abilitySet[key] = struct{}{}
+			abilities = append(abilities, Ability{
+				Group:     group,
+				Model:     modelName,
+				ChannelId: channel.Id,
+				Enabled:   channel.Status == common.ChannelStatusEnabled,
+				Priority:  channel.Priority,
+				Weight:    uint(channel.GetWeight()),
+				Tag:       channel.Tag,
+			})
+		}
+	}
+	return abilities, nil
 }
 
 func (channel *Channel) DeleteAbilities() error {
@@ -265,29 +302,13 @@ func (channel *Channel) UpdateAbilities(tx *gorm.DB) error {
 		return err
 	}
 
-	// Then add new abilities
-	models_ := strings.Split(channel.Models, ",")
-	groups_ := strings.Split(channel.Group, ",")
-	abilitySet := make(map[string]struct{})
-	abilities := make([]Ability, 0, len(models_))
-	for _, model := range models_ {
-		for _, group := range groups_ {
-			key := group + "|" + model
-			if _, exists := abilitySet[key]; exists {
-				continue
-			}
-			abilitySet[key] = struct{}{}
-			ability := Ability{
-				Group:     group,
-				Model:     model,
-				ChannelId: channel.Id,
-				Enabled:   channel.Status == common.ChannelStatusEnabled,
-				Priority:  channel.Priority,
-				Weight:    uint(channel.GetWeight()),
-				Tag:       channel.Tag,
-			}
-			abilities = append(abilities, ability)
+	// Then rebuild from the channel's effective model-group projection
+	abilities, err := channel.buildAbilities(tx)
+	if err != nil {
+		if isNewTx {
+			tx.Rollback()
 		}
+		return err
 	}
 
 	if len(abilities) > 0 {

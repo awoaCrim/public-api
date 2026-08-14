@@ -27,7 +27,7 @@ import { quotaUnitsToDollars } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 
 import { DEFAULT_GROUP } from '../constants'
-import { type UserFormData, type User } from '../types'
+import type { UserFormData, User } from '../types'
 
 // ============================================================================
 // Form Schema
@@ -44,6 +44,7 @@ export const userFormSchema = z.object({
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
     .optional(),
+  extra_group_keys: z.array(z.string()),
 })
 
 export type UserFormValues = z.infer<typeof userFormSchema>
@@ -62,6 +63,7 @@ export const USER_FORM_DEFAULT_VALUES: UserFormValues = {
   remark: '',
   // Filled against the backend catalog at render time; see UsersMutateDrawer.
   admin_permissions: {},
+  extra_group_keys: [],
 }
 
 // ============================================================================
@@ -102,6 +104,9 @@ export function transformFormDataToPayload(
     payload.group = data.group
     payload.remark = data.remark || undefined
     payload.id = userId
+    // Presence semantics: always send the explicit grant set so an empty
+    // selection clears manual grants on the backend.
+    payload.extra_group_keys = data.extra_group_keys ?? []
   }
 
   return payload
@@ -122,5 +127,6 @@ export function transformUserToFormDefaults(user: User): UserFormValues {
     group: user.group || DEFAULT_GROUP,
     remark: user.remark || '',
     admin_permissions: user.admin_permissions ?? {},
+    extra_group_keys: user.extra_group_keys ?? [],
   }
 }

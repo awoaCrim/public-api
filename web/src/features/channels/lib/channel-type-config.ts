@@ -113,6 +113,12 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'deepseek-chat,deepseek-coder',
     },
   },
+  45: {
+    id: 45,
+    name: CHANNEL_TYPES[45],
+    icon: 'volcengine',
+    defaultBaseUrl: 'https://ark.cn-beijing.volces.com',
+  },
   20: {
     id: 20,
     name: CHANNEL_TYPES[20],
@@ -164,6 +170,17 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models: 'Models',
     },
   },
+  61: {
+    id: 61,
+    name: CHANNEL_TYPES[61],
+    icon: 'openai',
+    defaultBaseUrl: 'https://opencode.ai',
+    hints: {
+      baseUrl: 'Default: https://opencode.ai',
+      key: 'Enter API key for this channel',
+      models: 'Models fetched from upstream /v1/models',
+    },
+  },
 }
 
 /**
@@ -198,6 +215,22 @@ export function requiresRegion(type: number): boolean {
  */
 export function getDefaultBaseUrl(type: number): string {
   return CHANNEL_TYPE_CONFIGS[type]?.defaultBaseUrl || ''
+}
+
+/**
+ * Preserve custom URLs while replacing defaults when the channel type changes.
+ */
+export function getBaseUrlForChannelTypeChange(
+  previousType: number,
+  nextType: number,
+  currentBaseUrl: string
+): string {
+  const previousDefaultBaseUrl = getDefaultBaseUrl(previousType)
+  const hasCustomBaseUrl =
+    currentBaseUrl.trim() !== '' && currentBaseUrl !== previousDefaultBaseUrl
+
+  if (hasCustomBaseUrl) return currentBaseUrl
+  return getDefaultBaseUrl(nextType)
 }
 
 /**

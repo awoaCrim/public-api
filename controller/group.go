@@ -29,6 +29,16 @@ func GetUserGroups(c *gin.Context) {
 	userId := c.GetInt("id")
 	userGroup, _ = model.GetUserGroup(userId, false)
 	userUsableGroups := service.GetUserUsableGroups(userGroup)
+	if effective, effErr := service.GetUserEffectiveGroups(userId); effErr == nil && len(effective) > 0 {
+		userUsableGroups = effective
+	}
+	hasAutoGroup := false
+	for groupName := range service.GetUserUsableGroups(userGroup) {
+		if groupName == "auto" {
+			hasAutoGroup = true
+			break
+		}
+	}
 	for groupName, _ := range ratio_setting.GetGroupRatioCopy() {
 		// UserUsableGroups contains the groups that the user can use
 		if desc, ok := userUsableGroups[groupName]; ok {
@@ -38,7 +48,7 @@ func GetUserGroups(c *gin.Context) {
 			}
 		}
 	}
-	if _, ok := userUsableGroups["auto"]; ok {
+	if hasAutoGroup {
 		usableGroups["auto"] = map[string]interface{}{
 			"ratio": "自动",
 			"desc":  setting.GetUsableGroupDescription("auto"),

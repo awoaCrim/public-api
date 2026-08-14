@@ -5,10 +5,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -25,7 +27,7 @@ func configureTokenAutoGroupsTest(t *testing.T, maxCount string, autoGroups stri
 	require.NoError(t, setting.UpdateMaxTokenAutoGroups(maxCount))
 	require.NoError(t, setting.UpdateAutoGroupsByJsonString(autoGroups))
 	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","vip":"VIP"}`))
-	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":1}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":1,"svip":1}`))
 	t.Cleanup(func() {
 		require.NoError(t, setting.UpdateMaxTokenAutoGroups(stringInt(originalMax)))
 		require.NoError(t, setting.UpdateAutoGroupsByJsonString(originalAutoGroups))
@@ -41,7 +43,7 @@ func stringInt(value int) string {
 func setupTokenAutoGroupsControllerTest(t *testing.T) *model.User {
 	t.Helper()
 	db := setupTokenControllerTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserGroupGrant{}))
 	user := &model.User{
 		Id:       101,
 		Username: "token-auto-user",
@@ -184,6 +186,75 @@ func TestUpdateTokenAutoGroupsTriStateAndNonAutoCleanup(t *testing.T) {
 	}
 }
 
+func TestAddTokenAcceptsActiveExtraGrantAsAutoGroupCandidate(t *testing.T) {
+	configureTokenAutoGroupsTest(t, "5", `["default","vip"]`)
+	user := setupTokenAutoGroupsControllerTest(t)
+	require.NoError(t, model.DB.Create(&model.UserGroupGrant{
+		UserId:   user.Id,
+		GroupKey: "svip",
+		Source:   service.UserGroupGrantSourceManual,
+	}).Error)
+
+	request := baseAutoTokenRequest("extra-grant-candidate")
+	request["auto_groups"] = []string{"svip"}
+	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodPost, "/api/token/", request, user.Id)
+
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	var token model.Token
+	require.NoError(t, model.DB.Where("name = ?", "extra-grant-candidate").First(&token).Error)
+	assert.JSONEq(t, `["svip"]`, token.AutoGroups)
+}
+
+func TestAddTokenRejectsExpiredExtraGrantAsAutoGroupCandidate(t *testing.T) {
+	configureTokenAutoGroupsTest(t, "5", `["default","vip"]`)
+	user := setupTokenAutoGroupsControllerTest(t)
+	require.NoError(t, model.DB.Create(&model.UserGroupGrant{
+		UserId:    user.Id,
+		GroupKey:  "svip",
+		Source:    service.UserGroupGrantSourceManual,
+		ExpiresAt: time.Now().Add(-time.Minute).Unix(),
+	}).Error)
+
+	request := baseAutoTokenRequest("expired-extra-grant")
+	request["auto_groups"] = []string{"svip"}
+	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodPost, "/api/token/", request, user.Id)
+
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	assert.False(t, response.Success)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Token{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestAddTokenRejectsRevokedExtraGrantAsAutoGroupCandidate(t *testing.T) {
+	configureTokenAutoGroupsTest(t, "5", `["default","vip"]`)
+	user := setupTokenAutoGroupsControllerTest(t)
+	grant := &model.UserGroupGrant{
+		UserId:   user.Id,
+		GroupKey: "svip",
+		Source:   service.UserGroupGrantSourceManual,
+	}
+	require.NoError(t, model.DB.Create(grant).Error)
+	require.NoError(t, model.DB.Delete(grant).Error)
+
+	request := baseAutoTokenRequest("revoked-extra-grant")
+	request["auto_groups"] = []string{"svip"}
+	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodPost, "/api/token/", request, user.Id)
+
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	assert.False(t, response.Success)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Token{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
 func TestAddTokenRejectsInvalidAutoGroups(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -213,6 +284,27 @@ func TestAddTokenRejectsInvalidAutoGroups(t *testing.T) {
 			assert.Zero(t, count)
 		})
 	}
+}
+
+func TestGetTokenAutoGroupsIncludesActiveExtraGrant(t *testing.T) {
+	configureTokenAutoGroupsTest(t, "5", `["svip","default","vip"]`)
+	user := setupTokenAutoGroupsControllerTest(t)
+	require.NoError(t, model.DB.Create(&model.UserGroupGrant{
+		UserId:   user.Id,
+		GroupKey: "svip",
+		Source:   service.UserGroupGrantSourceManual,
+	}).Error)
+
+	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodGet, "/api/token/auto-groups", nil, user.Id)
+	GetTokenAutoGroups(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	var data struct {
+		Groups []string `json:"groups"`
+	}
+	require.NoError(t, common.Unmarshal(response.Data, &data))
+	assert.Equal(t, []string{"svip", "default", "vip"}, data.Groups)
 }
 
 func TestGetTokenAutoGroupsReturnsFullFilteredGlobalOrderAndLimit(t *testing.T) {

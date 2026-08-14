@@ -41,6 +41,33 @@ type tokenResponse struct {
 	AutoGroups []string `json:"auto_groups"`
 }
 
+// resolveTokenRoutingMutation validates a token's fixed group against the
+// user's current effective permission set before create/update. auto keys
+// pass; fixed keys must be granted (root bypasses grants) and may not enable
+// cross-group retry.
+func resolveTokenRoutingMutation(userID int, token *model.Token) error {
+	key := strings.TrimSpace(token.Group)
+	if key == "" {
+		return fmt.Errorf("token group is required")
+	}
+	if key == "auto" {
+		token.Group = "auto"
+		return nil
+	}
+	allowed, err := service.IsUserGroupAllowed(userID, key)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return service.ErrRoutingGroupNotGranted
+	}
+	if token.CrossGroupRetry {
+		return service.ErrRoutingAutoNotAllowed
+	}
+	token.Group = key
+	return nil
+}
+
 func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	if token == nil {
 		return nil
@@ -91,7 +118,7 @@ func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) boo
 		return false
 	}
 
-	userGroup, err := getTokenRequestUserGroup(c)
+	effectiveGroups, err := service.GetUserEffectiveGroups(c.GetInt("id"))
 	if err != nil {
 		common.ApiError(c, err)
 		return false
@@ -103,7 +130,11 @@ func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) boo
 			return false
 		}
 		seen[group] = struct{}{}
-		if !service.IsUserSelectableGroup(userGroup, group) {
+		if group == "auto" {
+			common.ApiErrorI18n(c, i18n.MsgTokenAutoGroupsInvalid, map[string]any{"Group": group})
+			return false
+		}
+		if _, ok := effectiveGroups[group]; !ok {
 			common.ApiErrorI18n(c, i18n.MsgTokenAutoGroupsInvalid, map[string]any{"Group": group})
 			return false
 		}
@@ -163,13 +194,24 @@ func GetToken(c *gin.Context) {
 }
 
 func GetTokenAutoGroups(c *gin.Context) {
-	userGroup, err := getTokenRequestUserGroup(c)
-	if err != nil {
-		common.ApiError(c, err)
-		return
+	var autoGroups []string
+	if userId := c.GetInt("id"); userId > 0 {
+		var err error
+		autoGroups, err = service.GetUserAutoGroupByID(userId)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	} else {
+		userGroup, err := getTokenRequestUserGroup(c)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		autoGroups = service.GetUserAutoGroup(userGroup)
 	}
 	common.ApiSuccess(c, gin.H{
-		"groups":    service.GetUserAutoGroup(userGroup),
+		"groups":    autoGroups,
 		"max_count": setting.GetMaxTokenAutoGroups(),
 	})
 }
@@ -299,6 +341,10 @@ func AddToken(c *gin.Context) {
 		})
 		return
 	}
+	if err := resolveTokenRoutingMutation(c.GetInt("id"), &token); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if token.Group == "auto" {
 		if !setTokenAutoGroups(c, &token, request.AutoGroups.Groups) {
 			return
@@ -397,6 +443,16 @@ func UpdateToken(c *gin.Context) {
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
 	} else {
+		// Fixed-group updates force cross-group retry off (existing cleanup
+		// semantics) before the routing validation runs, so historical auto
+		// tokens edited into a fixed group are coerced rather than rejected.
+		if token.Group != "auto" {
+			token.CrossGroupRetry = false
+		}
+		if err := resolveTokenRoutingMutation(userId, &token); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
 		cleanToken.ExpiredTime = token.ExpiredTime

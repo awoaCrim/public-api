@@ -1,0 +1,128 @@
+package service
+
+import (
+	"testing"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+	operation_setting "github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestValidateLLMReviewVerdict(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		ok   bool
+	}{
+		{"valid violation", `{"verdict":"violation","category":"limit_bypass","confidence":0.95,"reason":"r","evidence":["e1"]}`, true},
+		{"valid compliant", `{"verdict":"compliant","category":"none","confidence":0.9,"reason":"ok","evidence":["fine"]}`, true},
+		{"empty", "", false},
+		{"invalid json", `{`, false},
+		{"bad verdict", `{"verdict":"maybe","category":"none","confidence":0.5,"reason":"r","evidence":["e"]}`, false},
+		{"bad category", `{"verdict":"violation","category":"spam","confidence":0.9,"reason":"r","evidence":["e"]}`, false},
+		{"confidence too high", `{"verdict":"violation","category":"none","confidence":1.5,"reason":"r","evidence":["e"]}`, false},
+		{"confidence negative", `{"verdict":"violation","category":"none","confidence":-0.1,"reason":"r","evidence":["e"]}`, false},
+		{"missing evidence", `{"verdict":"violation","category":"none","confidence":0.9,"reason":"r","evidence":[]}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			verdict, ok, msg := ValidateLLMReviewVerdict([]byte(tt.in))
+			assert.Equal(t, tt.ok, ok, msg)
+			if tt.ok {
+				require.NotNil(t, verdict)
+			}
+		})
+	}
+}
+
+func TestShouldAutoBanGating(t *testing.T) {
+	cfg := llmReviewSettingForTest(t)
+	cfg.SchemaTested = true
+	cfg.AutoBanConfidence = 0.9
+
+	violation := &ReviewVerdictResponse{
+		Verdict:    "violation",
+		Category:   "account_sharing",
+		Confidence: 0.95,
+		Reason:     "shared account",
+		Evidence:   []string{"multiple tokens from one account"},
+	}
+
+	assert.True(t, ShouldAutoBan(violation, true, cfg))
+	assert.False(t, ShouldAutoBan(nil, true, cfg), "nil verdict must not ban")
+	assert.False(t, ShouldAutoBan(violation, false, cfg), "schema failure must not ban")
+
+	low := *violation
+	low.Confidence = 0.8
+	assert.False(t, ShouldAutoBan(&low, true, cfg), "below-threshold confidence must not ban")
+
+	contentCategory := *violation
+	contentCategory.Category = "code_generation"
+	assert.False(t, ShouldAutoBan(&contentCategory, true, cfg), "content-semantic categories require human review")
+
+	untested := llmReviewSettingForTest(t)
+	untested.SchemaTested = false
+	assert.False(t, ShouldAutoBan(violation, true, untested), "capability-test failure must not ban")
+}
+
+func TestParseRawLLMResponse(t *testing.T) {
+	stringContent := `{"choices":[{"message":{"content":"{\"verdict\":\"compliant\"}"}}]}`
+	content, err := ParseRawLLMResponse([]byte(stringContent))
+	require.NoError(t, err)
+	assert.Equal(t, `{"verdict":"compliant"}`, content)
+
+	arrayContent := `{"choices":[{"message":{"content":[{"type":"text","text":"par"},{"type":"text","text":"tial"}]}}]}`
+	content, err = ParseRawLLMResponse([]byte(arrayContent))
+	require.NoError(t, err)
+	assert.Equal(t, "partial", content)
+
+	_, err = ParseRawLLMResponse([]byte(`{"choices":[]}`))
+	require.Error(t, err)
+	_, err = ParseRawLLMResponse([]byte(`{`))
+	require.Error(t, err)
+}
+
+func TestBuildPayloadSnapshotSanitizedContract(t *testing.T) {
+	originalSecret := common.CryptoSecret
+	common.CryptoSecret = "review-payload-test-secret"
+	t.Cleanup(func() { common.CryptoSecret = originalSecret })
+
+	cfg := llmReviewSettingForTest(t)
+	cfg.PolicyText = "Do not share accounts."
+
+	snapshot := buildPayloadSnapshot(LLMReviewTrigger{
+		UserId:         7,
+		ModelName:      "gpt-4o",
+		Endpoint:       "/v1/chat/completions",
+		IsStream:       true,
+		TriggerType:    LLMReviewTriggerRPM,
+		Stage:          LLMReviewStagePreflight,
+		CurrentValue:   12,
+		LimitValue:     10,
+		RequestSnippet: "sanitized snippet",
+		ClientIP:       "203.0.113.7",
+	}, cfg)
+	require.NotEmpty(t, snapshot)
+
+	var payload model.LLMReviewPayload
+	require.NoError(t, common.Unmarshal([]byte(snapshot), &payload))
+	assert.Equal(t, ReviewPolicyID, payload.PolicyID)
+	assert.Equal(t, "Do not share accounts.", payload.PolicyText)
+	assert.NotContains(t, snapshot, "203.0.113.7", "the raw client IP must never enter the payload")
+	assert.NotEmpty(t, payload.ClientIPHash, "only the irreversible IP hash may be included")
+	assert.Equal(t, model.LLMReviewTriggerRPM, payload.TriggerType)
+	assert.Equal(t, model.LLMReviewStagePreflight, payload.Stage)
+	assert.Equal(t, 12, payload.CurrentValue)
+}
+
+// llmReviewSettingForTest returns the live review settings with automatic
+// restoration.
+func llmReviewSettingForTest(t *testing.T) *operation_setting.LLMReviewSetting {
+	t.Helper()
+	cfg := operation_setting.GetLLMReviewSetting()
+	original := *cfg
+	t.Cleanup(func() { *cfg = original })
+	return cfg
+}

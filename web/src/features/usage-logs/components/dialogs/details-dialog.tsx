@@ -62,6 +62,7 @@ import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 import type { UsageLog } from '../../data/schema'
 import {
@@ -77,12 +78,14 @@ import {
   getReasoningEffortVariant,
   renderAuditContent,
 } from '../../lib/format'
+import { canViewRequestSnapshot } from '../../lib/request-snapshot'
 import {
   getLogTypeConfig,
   isPerCallBilling,
   isTimingLogType,
 } from '../../lib/utils'
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
+import { RequestSnapshotSection } from './request-snapshot-section'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
 // to its i18n label key for display in the audit details.
@@ -479,6 +482,7 @@ interface DetailsDialogProps {
 
 export function DetailsDialog(props: DetailsDialogProps) {
   const { t } = useTranslation()
+  const currentUser = useAuthStore((s) => s.auth.user)
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
   const details = props.log.content ?? ''
   const other = parseLogOther(props.log.other)
@@ -737,6 +741,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
         </div>
+
+        {/* Captured request body (admin + request_snapshot.read only) */}
+        {canViewRequestSnapshot(
+          currentUser,
+          props.isAdmin,
+          props.log.request_id
+        ) && (
+          <RequestSnapshotSection
+            requestId={props.log.request_id}
+            parentOpen={props.open}
+          />
+        )}
 
         {/* Request conversion (admin only, not for refund) */}
         {showConversion && (

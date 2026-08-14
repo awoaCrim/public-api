@@ -99,9 +99,19 @@ func openTokenControllerTestDB(t *testing.T) *gorm.DB {
 func migrateTokenControllerTestDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
-	if err := db.AutoMigrate(&model.Token{}); err != nil {
+	if err := db.AutoMigrate(&model.Token{}, &model.User{}, &model.UserGroupGrant{}); err != nil {
 		t.Fatalf("failed to migrate token table: %v", err)
 	}
+	// UpdateToken group validation resolves the owner's effective group set,
+	// which needs a real user row in the fixture.
+	_ = db.Create(&model.User{
+		Id:       1,
+		Username: "token-fixture-user",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+		AffCode:  "token-fixture-aff",
+	}).Error
 }
 
 func setupTokenControllerTestDB(t *testing.T) *gorm.DB {

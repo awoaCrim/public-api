@@ -23,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/requestsnapshot"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -126,6 +127,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
+	// Request snapshot capture: best-effort, exactly once, synchronous byte
+	// copy of the validated request body. It intentionally captures
+	// authenticated well-formed requests even if later processing fails
+	// (sensitive check, pre-consume, upstream errors). Real-time WebSocket
+	// requests are skipped: their body is not replayable.
+	if relayFormat != types.RelayFormatOpenAIRealtime {
+		captureRequestSnapshot(c, relayInfo, relayFormat)
+	}
+
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
 	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.
@@ -152,6 +162,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	relayInfo.SetEstimatePromptTokens(tokens)
+
+	// Input-token preflight hard limit: only text modes, only when the limit
+	// setting is enabled and the estimator passed model acceptance. A hit
+	// writes the 429 and stops the request before pricing/pre-consume and
+	// upstream forwarding.
+	if relayconstant.IsTextTokenLimitMode(relayInfo.RelayMode) && checkInputTokenPreflight(c, relayInfo, tokens) {
+		return
+	}
 
 	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
 	if err != nil {
@@ -249,6 +267,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		logger.LogInfo(c, retryLogStr)
 	}
 	if newAPIError != nil {
+		middleware.MarkRPMFailure(c)
 		gopool.Go(func() {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
@@ -260,6 +279,39 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true // 允许跨域
 	},
+}
+
+// captureRequestSnapshot copies the validated request body bytes synchronously
+// into the request snapshot store. Failures are logged and never fail the
+// relay request: capturing is auxiliary.
+func captureRequestSnapshot(c *gin.Context, relayInfo *relaycommon.RelayInfo, relayFormat types.RelayFormat) {
+	body, err := common.GetBodyStorage(c)
+	if err != nil {
+		logger.LogWarn(c, "request snapshot: body storage unavailable: "+err.Error())
+		return
+	}
+	data, err := body.Bytes()
+	if err != nil {
+		logger.LogWarn(c, "request snapshot: read body failed: "+err.Error())
+		return
+	}
+	// Copy synchronously so the exact captured bytes stay immutable even if
+	// the request body storage is reused, closed, or retried later.
+	bytesCopy := append([]byte(nil), data...)
+
+	meta := requestsnapshot.CaptureMeta{
+		RequestID:   relayInfo.RequestId,
+		UserID:      relayInfo.UserId,
+		TokenID:     relayInfo.TokenId,
+		ModelName:   relayInfo.OriginModelName,
+		RelayFormat: string(relayFormat),
+		Method:      c.Request.Method,
+		Path:        c.Request.URL.Path,
+		ContentType: c.ContentType(),
+	}
+	if err := requestsnapshot.Default().Capture(c.Request.Context(), meta, bytesCopy); err != nil {
+		logger.LogWarn(c, "request snapshot capture failed: "+err.Error())
+	}
 }
 
 func addUsedChannel(c *gin.Context, channelId int) {

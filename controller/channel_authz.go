@@ -33,6 +33,9 @@ func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, re
 	if _, ok := requestData["key_mode"]; ok && channel.KeyMode != nil {
 		return true
 	}
+	if _, ok := requestData["model_group_modes"]; ok && !channelModelGroupModesEqual(channel.ModelGroupModes, origin.ModelGroupModes) {
+		return true
+	}
 	// Fail closed: any field present in the request that is neither a known
 	// sensitive field (gated above) nor an explicitly classified non-sensitive
 	// field must be treated as sensitive. This keeps a newly added channel field
@@ -71,6 +74,7 @@ var channelSensitiveFields = map[string]struct{}{
 	"other":               {},
 	"settings":            {},
 	"key_mode":            {},
+	"model_group_modes":   {},
 }
 
 // channelOperationalFields lists fields managed by operation endpoints instead
@@ -133,4 +137,31 @@ var channelNonSensitiveFields = map[string]struct{}{
 	"remark":              {},
 	"channel_info":        {},
 	"multi_key_mode":      {},
+}
+
+// channelModelGroupModesEqual compares two model-group tri-state policy sets.
+// Order is significant because group order drives sort_order. A nil set means
+// "keep existing" and only equals another nil set.
+func channelModelGroupModesEqual(a, b *[]model.ChannelModelGroupModeInput) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if len(*a) != len(*b) {
+		return false
+	}
+	for i := range *a {
+		x, y := (*a)[i], (*b)[i]
+		if x.Model != y.Model || x.Mode != y.Mode || len(x.Groups) != len(y.Groups) {
+			return false
+		}
+		for j := range x.Groups {
+			if x.Groups[j] != y.Groups[j] {
+				return false
+			}
+		}
+	}
+	return true
 }

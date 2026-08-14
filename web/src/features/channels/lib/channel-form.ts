@@ -24,7 +24,7 @@ import {
   ERROR_MESSAGES,
   MODEL_FETCHABLE_TYPES,
 } from '../constants'
-import type { Channel } from '../types'
+import type { Channel, ChannelModelGroupModeInput } from '../types'
 import {
   CHANNEL_TYPE_ADVANCED_CUSTOM,
   advancedCustomConfigUsesRelativeUpstreamPath,
@@ -202,6 +202,15 @@ export const channelFormSchema = z
     openai_organization: z.string().optional(),
     models: z.string().min(1, ERROR_MESSAGES.REQUIRED_MODELS),
     group: z.array(z.string()).min(1, ERROR_MESSAGES.REQUIRED_GROUP),
+    model_group_modes: z
+      .array(
+        z.object({
+          model: z.string().min(1),
+          mode: z.enum(['inherit', 'custom', 'disabled']),
+          groups: z.array(z.string()),
+        })
+      )
+      .optional(),
     model_mapping: z
       .string()
       .optional()
@@ -406,6 +415,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   openai_organization: '',
   models: '',
   group: ['default'],
+  model_group_modes: [],
   model_mapping: '',
   priority: 0,
   weight: 0,
@@ -487,8 +497,7 @@ export function transformChannelToFormDefaults(
         thinking_to_content: parsed.thinking_to_content || false,
         proxy: parsed.proxy || '',
         http_protocol: protocol,
-        http2_connection_shards:
-          protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
+        http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
@@ -558,6 +567,7 @@ export function transformChannelToFormDefaults(
     openai_organization: channel.openai_organization || '',
     models: channel.models || '',
     group: parseGroups(channel.group || 'default'),
+    model_group_modes: channel.model_group_modes ?? [],
     model_mapping: channel.model_mapping || '',
     priority: channel.priority || 0,
     weight: channel.weight || 0,
@@ -832,6 +842,10 @@ export function transformFormDataToUpdatePayload(
     openai_organization: formData.openai_organization || null,
     models: formData.models,
     group: formatGroups(formData.group),
+    model_group_modes: pruneChannelModelGroupModes(
+      formData.model_group_modes ?? [],
+      parseModels(formData.models)
+    ),
     model_mapping: formData.model_mapping || null,
     priority: formData.priority ?? 0,
     weight: formData.weight ?? 0,
@@ -901,6 +915,18 @@ export function validateModelMapping(value: string): boolean {
 /**
  * Parse models string to array
  */
+/**
+ * Prune model group policies to models currently published by the channel.
+ * Policies for removed models are dropped.
+ */
+export function pruneChannelModelGroupModes(
+  modes: ChannelModelGroupModeInput[],
+  models: string[]
+): ChannelModelGroupModeInput[] {
+  const modelSet = new Set(models)
+  return modes.filter((mode) => modelSet.has(mode.model))
+}
+
 export function parseModels(models: string): string[] {
   if (!models) return []
   return models

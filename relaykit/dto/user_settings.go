@@ -16,6 +16,19 @@ type UserSetting struct {
 	SidebarModules                   string  `json:"sidebar_modules,omitempty"`                      // SidebarModules 左侧边栏模块配置
 	BillingPreference                string  `json:"billing_preference,omitempty"`                   // BillingPreference 扣费策略（订阅/钱包）
 	Language                         string  `json:"language,omitempty"`                             // Language 用户语言偏好 (zh, en)
+	// Vision 用户级视觉拦截配置（默认关闭）。
+	Vision *UserVisionSetting `json:"vision,omitempty"`
+}
+
+// UserVisionSetting is the per-user vision interception configuration.
+// Disabled by default; the interception middleware acts only when Enabled and
+// VisionSuffix are both set.
+type UserVisionSetting struct {
+	Enabled        bool   `json:"enabled,omitempty"`
+	VisionModel    string `json:"vision_model,omitempty"`    // 视觉描述模型
+	VisionSuffix   string `json:"vision_suffix,omitempty"`   // 触发拦截的模型名后缀
+	PromptTemplate string `json:"prompt_template,omitempty"` // 图片描述提示词模板
+	PhashThreshold int    `json:"phash_threshold,omitempty"` // pHash 汉明距离阈值（0=禁用）
 }
 
 var (

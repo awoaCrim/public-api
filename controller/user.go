@@ -165,6 +165,18 @@ func setupLoginAtAuthVersion(user *model.User, expectedAuthVersion int64, c *gin
 		common.ApiError(c, err)
 		return
 	}
+	if currentUser.Role < common.RoleRootUser && model.IsIPBlacklisted(c.ClientIP()) {
+		if err := model.BanUserByBlacklistedIP(currentUser.Id, c.ClientIP()); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"code":    "IP_BLACKLISTED",
+			"message": model.BlacklistedIPBanMessage,
+		})
+		return
+	}
 	var bundle *service.AuthBundle
 	if expectedAuthVersion > 0 {
 		bundle, err = service.CreateLoginSessionAtAuthVersion(
@@ -272,6 +284,10 @@ func Register(c *gin.Context) {
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
 	}
+	blockedRegistration := cleanUser.Role < common.RoleRootUser && model.IsIPBlacklisted(c.ClientIP())
+	if blockedRegistration {
+		cleanUser.Status = common.UserStatusDisabled
+	}
 	if err := cleanUser.Insert(inviterId); err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
@@ -285,6 +301,14 @@ func Register(c *gin.Context) {
 	var insertedUser model.User
 	if err := model.DB.Where("username = ?", cleanUser.Username).First(&insertedUser).Error; err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
+		return
+	}
+	if blockedRegistration {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"code":    "IP_BLACKLISTED",
+			"message": model.BlacklistedIPBanMessage,
+		})
 		return
 	}
 	// 生成默认令牌
@@ -389,6 +413,15 @@ func GetUser(c *gin.Context) {
 		return
 	}
 	user.AdminPermissions = authz.Capabilities(user.Id, user.Role)
+	if grants, grantsErr := model.ListUserGroupGrants(user.Id); grantsErr == nil {
+		keys := make([]string, 0, len(grants))
+		for _, grant := range grants {
+			if grant.Source == service.UserGroupGrantSourceManual {
+				keys = append(keys, grant.GroupKey)
+			}
+		}
+		user.ExtraGroupKeys = &keys
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -639,6 +672,9 @@ func GetUserModels(c *gin.Context) {
 		return
 	}
 	groups := service.GetUserUsableGroups(user.Group)
+	if effective, effErr := service.GetUserEffectiveGroups(user.Id); effErr == nil && len(effective) > 0 {
+		groups = effective
+	}
 	group := c.Query("group")
 	var groupsToQuery []string
 	switch {
@@ -647,9 +683,7 @@ func GetUserModels(c *gin.Context) {
 			groupsToQuery = append(groupsToQuery, g)
 		}
 	case group == "auto":
-		if _, ok := groups[group]; ok {
-			groupsToQuery = service.GetUserAutoGroup(user.Group)
-		}
+		groupsToQuery = service.GetAutoGroupsForUser(groups)
 	default:
 		if _, ok := groups[group]; ok {
 			groupsToQuery = []string{group}
@@ -660,6 +694,49 @@ func GetUserModels(c *gin.Context) {
 		"message": "",
 		"data":    service.GetGroupsEnabledModels(groupsToQuery),
 	})
+}
+
+// updateUserGroupGrants replaces the manual extra-group grant set of a user
+// inside the caller's transaction. Inherited account-tier groups are skipped,
+// keys outside the legacy group catalog are rejected, and expired or foreign
+// sources are never touched.
+func updateUserGroupGrants(tx *gorm.DB, userID int, groupKeys []string) error {
+	if !tx.Migrator().HasTable(&model.UserGroupGrant{}) {
+		return nil
+	}
+	var user model.User
+	if err := tx.Select("id", "group").First(&user, userID).Error; err != nil {
+		return err
+	}
+	access, err := service.ResolveUserGroupAccess(tx, userID, user.Group)
+	if err != nil {
+		return err
+	}
+	allowed := service.GetLegacyGroupCatalog()
+	if err := tx.Where("user_id = ? AND source = ?", userID, service.UserGroupGrantSourceManual).
+		Delete(&model.UserGroupGrant{}).Error; err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(groupKeys))
+	rows := make([]model.UserGroupGrant, 0, len(groupKeys))
+	for index, key := range groupKeys {
+		key = strings.TrimSpace(key)
+		if key == "" || key == "auto" || access.Inherited[key] {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("invalid user group: %s", key)
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		rows = append(rows, model.UserGroupGrant{UserId: userID, GroupKey: key, Source: service.UserGroupGrantSourceManual, SortOrder: index})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return tx.Create(&rows).Error
 }
 
 func UpdateUser(c *gin.Context) {
@@ -704,6 +781,13 @@ func UpdateUser(c *gin.Context) {
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
 		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
 			return err
+		}
+		// Presence semantics: nil leaves manual grants untouched, an explicit
+		// (even empty) slice replaces the whole manual grant set.
+		if updatedUser.ExtraGroupKeys != nil {
+			if err := updateUserGroupGrants(tx, updatedUser.Id, *updatedUser.ExtraGroupKeys); err != nil {
+				return err
+			}
 		}
 		touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, updatedUser.AdminPermissions)
 		authzTouched = touched
@@ -1250,6 +1334,22 @@ func ManageUser(c *gin.Context) {
 		"username": user.Username,
 		"id":       user.Id,
 	})
+	if req.Action == "enable" {
+		if err := middleware.ClearUserRateLimitKeys(user.Id); err != nil {
+			common.SysLog(fmt.Sprintf("failed to clear rate-limit keys for user %d: %s", user.Id, err.Error()))
+		}
+		// Best-effort review integration: manual re-enables supersede stale
+		// in-flight review results.
+		if err := model.RecordLLMReviewManualUnban(user.Id, common.GetTimestamp()); err != nil {
+			common.SysLog(fmt.Sprintf("failed to record llm review manual unban for user %d: %s", user.Id, err.Error()))
+		}
+	} else if req.Action == "disable" {
+		// Manual disables supersede pending review tasks.
+		if err := model.RecordLLMReviewManualBan(user.Id, common.GetTimestamp()); err != nil {
+			common.SysLog(fmt.Sprintf("failed to record llm review manual ban for user %d: %s", user.Id, err.Error()))
+		}
+		_ = model.CancelPendingLLMReviewTasks(user.Id, model.SkipReasonManualBan)
+	}
 	clearUser := model.User{
 		Role:   user.Role,
 		Status: user.Status,
@@ -1385,19 +1485,47 @@ func TopUp(c *gin.Context) {
 	})
 }
 
+type UpdateUserVisionSettingRequest struct {
+	Vision *dto.UserVisionSetting `json:"vision" binding:"required"`
+}
+
+func UpdateUserVisionSetting(c *gin.Context) {
+	var req UpdateUserVisionSettingRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Vision == nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+
+	user, err := model.GetUserById(c.GetInt("id"), true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	settings := user.GetSetting()
+	settings.Vision = req.Vision
+	if err := model.UpdateUserSetting(user.Id, settings); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgUpdateFailed)
+		return
+	}
+
+	common.ApiSuccessI18n(c, i18n.MsgSettingSaved, nil)
+}
+
 type UpdateUserSettingRequest struct {
-	QuotaWarningType                 string  `json:"notify_type"`
-	QuotaWarningThreshold            float64 `json:"quota_warning_threshold"`
-	WebhookUrl                       string  `json:"webhook_url,omitempty"`
-	WebhookSecret                    string  `json:"webhook_secret,omitempty"`
-	NotificationEmail                string  `json:"notification_email,omitempty"`
-	BarkUrl                          string  `json:"bark_url,omitempty"`
-	GotifyUrl                        string  `json:"gotify_url,omitempty"`
-	GotifyToken                      string  `json:"gotify_token,omitempty"`
-	GotifyPriority                   int     `json:"gotify_priority,omitempty"`
-	UpstreamModelUpdateNotifyEnabled *bool   `json:"upstream_model_update_notify_enabled,omitempty"`
-	AcceptUnsetModelRatioModel       bool    `json:"accept_unset_model_ratio_model"`
-	RecordIpLog                      bool    `json:"record_ip_log"`
+	QuotaWarningType                 string                 `json:"notify_type"`
+	QuotaWarningThreshold            float64                `json:"quota_warning_threshold"`
+	WebhookUrl                       string                 `json:"webhook_url,omitempty"`
+	WebhookSecret                    string                 `json:"webhook_secret,omitempty"`
+	NotificationEmail                string                 `json:"notification_email,omitempty"`
+	BarkUrl                          string                 `json:"bark_url,omitempty"`
+	GotifyUrl                        string                 `json:"gotify_url,omitempty"`
+	GotifyToken                      string                 `json:"gotify_token,omitempty"`
+	GotifyPriority                   int                    `json:"gotify_priority,omitempty"`
+	UpstreamModelUpdateNotifyEnabled *bool                  `json:"upstream_model_update_notify_enabled,omitempty"`
+	AcceptUnsetModelRatioModel       bool                   `json:"accept_unset_model_ratio_model"`
+	RecordIpLog                      bool                   `json:"record_ip_log"`
+	Vision                           *dto.UserVisionSetting `json:"vision,omitempty"`
 }
 
 func UpdateUserSetting(c *gin.Context) {
@@ -1513,6 +1641,13 @@ func UpdateUserSetting(c *gin.Context) {
 	// 如果提供了通知邮箱，添加到设置中
 	if req.QuotaWarningType == dto.NotifyTypeEmail && req.NotificationEmail != "" {
 		settings.NotificationEmail = req.NotificationEmail
+	}
+
+	// Vision 拦截配置：携带则整体覆盖，缺省保留现有配置（该接口的其余字段
+	// 是通知类设置，不能顺带清空用户已保存的 vision 配置）。
+	settings.Vision = existingSettings.Vision
+	if req.Vision != nil {
+		settings.Vision = req.Vision
 	}
 
 	// 如果是Bark类型，添加Bark URL到设置中

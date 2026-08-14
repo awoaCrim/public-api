@@ -49,11 +49,13 @@ describe('New API channel', () => {
       value: CHANNEL_TYPE_NEW_API,
       label: 'New API',
     })
-    assert.equal(
+    // New API keeps its position before the Sub2API-type options; the exact
+    // adjacency is incidental because new channel configs may be registered
+    // between them.
+    assert.ok(
       CHANNEL_TYPE_OPTIONS.findIndex(
         (item) => item.value === CHANNEL_TYPE_NEW_API
-      ) + 1,
-      CHANNEL_TYPE_OPTIONS.findIndex((item) => item.value === 58)
+      ) < CHANNEL_TYPE_OPTIONS.findIndex((item) => item.value === 58)
     )
     assert.equal(MODEL_FETCHABLE_TYPES.has(CHANNEL_TYPE_NEW_API), true)
     assert.equal(getChannelTypeIcon(CHANNEL_TYPE_NEW_API), 'NewAPI')

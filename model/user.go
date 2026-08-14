@@ -110,6 +110,10 @@ type User struct {
 	LastLoginAt      int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
 	AuthVersion      int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
 	AdminPermissions map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
+	// ExtraGroupKeys carries the user's extra original-group grants on read
+	// and update. nil leaves grants untouched; an explicit (even empty)
+	// slice replaces the manual grant set. Never persisted on the user row.
+	ExtraGroupKeys *[]string `json:"extra_group_keys,omitempty" gorm:"-:all"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -422,6 +426,10 @@ func GetAllUsers(pageInfo *common.PageInfo, sortOptions ...UserSortOptions) (use
 }
 
 func SearchUsers(keyword string, group string, role *int, status *int, startIdx int, num int, sortOptions ...UserSortOptions) ([]*User, int64, error) {
+	keyword = strings.TrimSpace(keyword)
+	if normalizedIP, ok := common.NormalizeIPv4(keyword); ok {
+		return searchUsersByIPv4(normalizedIP, group, role, status, startIdx, num, sortOptions...)
+	}
 	var users []*User
 	var total int64
 	var err error

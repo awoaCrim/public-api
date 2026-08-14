@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/service/authz"
 
 	// Import oauth package to register providers via init()
 	_ "github.com/QuantumNous/new-api/oauth"
@@ -62,6 +63,40 @@ func SetApiRouter(router *gin.Engine) {
 		// in Pancake's matching webhook slot; handler enforces env match.
 		apiRouter.POST("/waffo-pancake/webhook/:env", anonymousRequestBodyLimit, controller.WaffoPancakeWebhook)
 
+		ipBlacklistRoute := apiRouter.Group("/ip_blacklist")
+		ipBlacklistRoute.Use(middleware.RootAuth())
+		{
+			ipBlacklistRoute.GET("/", controller.GetIPBlacklist)
+			ipBlacklistRoute.POST("/", controller.AddIPBlacklist)
+			ipBlacklistRoute.DELETE("/:id", controller.RemoveIPBlacklist)
+		}
+
+		// LLM compliance review management. Configuration and capability
+		// tests are root-only; task list/detail/retry/summary require the
+		// llm_review.read permission (no built-in role baseline) plus a
+		// secondary 2FA/passkey proof inside the sensitive handlers.
+		llmReviewConfigRoute := apiRouter.Group("/llm_review")
+		llmReviewConfigRoute.Use(middleware.RootAuth())
+		{
+			llmReviewConfigRoute.GET("/config", controller.GetLLMReviewConfig)
+			llmReviewConfigRoute.PUT("/config", controller.UpdateLLMReviewConfig)
+			llmReviewConfigRoute.POST("/test_connection", controller.TestLLMReviewConnection)
+			llmReviewConfigRoute.POST("/test_schema", controller.TestLLMReviewSchema)
+			llmReviewConfigRoute.GET("/schema_status", controller.GetLLMReviewSchemaStatus)
+			llmReviewConfigRoute.POST("/clear_api_key", controller.ClearLLMReviewAPIKey)
+		}
+		llmReviewRoute := apiRouter.Group("/llm_review")
+		llmReviewRoute.Use(middleware.AdminAuth())
+		llmReviewRoute.Use(middleware.RequirePermission(authz.LLMReviewRead))
+		{
+			llmReviewRoute.GET("/tasks", controller.ListLLMReviewTasks)
+			llmReviewRoute.GET("/tasks/summary", controller.GetLLMReviewQueueSummary)
+			llmReviewRoute.GET("/tasks/:id", controller.GetLLMReviewTaskDetail)
+			llmReviewRoute.POST("/tasks/:id/retry", controller.RetryLLMReviewTask)
+			llmReviewRoute.GET("/grace", controller.GetLLMReviewGrace)
+			llmReviewRoute.POST("/tasks", controller.CreateLLMReviewTask)
+		}
+
 		// Universal secure verification routes
 		apiRouter.POST("/verify", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), controller.UniversalVerify)
 
@@ -112,6 +147,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPancakePay)
 				selfRoute.POST("/aff_transfer", middleware.UserCriticalRateLimit("aff-transfer"), controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
+				selfRoute.PUT("/setting/vision", controller.UpdateUserVisionSetting)
 
 				// 2FA routes
 				selfRoute.GET("/2fa/status", controller.Get2FAStatus)
@@ -225,6 +261,20 @@ func SetApiRouter(router *gin.Engine) {
 			performanceRoute.GET("/logs", controller.GetLogFiles)
 			performanceRoute.DELETE("/logs", controller.CleanupLogFiles)
 		}
+		usageAnalysisRoute := apiRouter.Group("/usage-analysis")
+		usageAnalysisRoute.Use(middleware.RootAuth(), middleware.CriticalRateLimit(), middleware.DisableCache())
+		{
+			usageAnalysisRoute.GET("", controller.GetUsageAnalysis)
+			usageAnalysisRoute.GET("/options", controller.GetUsageAnalysisOptions)
+		}
+		routingGroupMigrationRoute := apiRouter.Group("/routing-group-migration")
+		routingGroupMigrationRoute.Use(middleware.RootAuth(), middleware.CriticalRateLimit(), middleware.DisableCache())
+		{
+			routingGroupMigrationRoute.GET("/preview", controller.RoutingGroupMigrationPreview)
+			routingGroupMigrationRoute.GET("/status", controller.RoutingGroupMigrationStatus)
+			routingGroupMigrationRoute.POST("/run", controller.RoutingGroupMigrationRun)
+		}
+
 		ratioSyncRoute := apiRouter.Group("/ratio_sync")
 		ratioSyncRoute.Use(middleware.RootAuth())
 		{
@@ -277,6 +327,13 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
+		logRoute.GET("/:request_id/snapshot",
+			middleware.AdminAuth(),
+			middleware.CriticalRateLimit(),
+			middleware.DisableCache(),
+			middleware.RequirePermission(authz.RequestSnapshotRead),
+			controller.GetRequestSnapshot,
+		)
 
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())

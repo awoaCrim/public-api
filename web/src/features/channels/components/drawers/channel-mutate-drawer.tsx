@@ -163,6 +163,9 @@ import {
   extractRedirectModels,
   extractMappingSourceModels,
   hasModelConfigChanged,
+  getBaseUrlForChannelTypeChange,
+  getChannelTypeHints,
+  getDefaultBaseUrl,
   findMissingModelsInMapping,
   validateModelMappingJson,
   hasAdvancedSettingsErrors,
@@ -188,6 +191,7 @@ import {
   ChannelAuthSection,
   ChannelBasicSection,
   ChannelEditorLoadingState,
+  ChannelModelGroupPolicies,
   ChannelModelsSection,
 } from './sections'
 
@@ -927,6 +931,11 @@ export function ChannelMutateDrawer({
     [currentType]
   )
 
+  const currentChannelTypeHints = useMemo(
+    () => getChannelTypeHints(currentType),
+    [currentType]
+  )
+
   const channelTypeOptions = useMemo(() => {
     const options = CHANNEL_TYPE_OPTIONS.map((option) => ({
       value: String(option.value),
@@ -1274,7 +1283,7 @@ export function ChannelMutateDrawer({
     if (currentType === 45) {
       const currentBaseUrlValue = form.getValues('base_url')
       if (!currentBaseUrlValue || currentBaseUrlValue === '') {
-        form.setValue('base_url', 'https://ark.cn-beijing.volces.com')
+        form.setValue('base_url', getDefaultBaseUrl(45))
       }
     }
 
@@ -1290,7 +1299,7 @@ export function ChannelMutateDrawer({
   useEffect(() => {
     if (currentType !== 45 || currentBaseUrl !== 'doubao-coding-plan') return
 
-    form.setValue('base_url', 'https://ark.cn-beijing.volces.com', {
+    form.setValue('base_url', getDefaultBaseUrl(45), {
       shouldDirty: false,
       shouldValidate: true,
     })
@@ -1996,6 +2005,25 @@ export function ChannelMutateDrawer({
                                             Number.isInteger(nextType) &&
                                             nextType > 0
                                           ) {
+                                            const nextBaseUrl =
+                                              getBaseUrlForChannelTypeChange(
+                                                Number(field.value),
+                                                nextType,
+                                                form.getValues('base_url') || ''
+                                              )
+                                            if (
+                                              nextBaseUrl !==
+                                              form.getValues('base_url')
+                                            ) {
+                                              form.setValue(
+                                                'base_url',
+                                                nextBaseUrl,
+                                                {
+                                                  shouldDirty: true,
+                                                  shouldValidate: true,
+                                                }
+                                              )
+                                            }
                                             field.onChange(nextType)
                                           }
                                         }}
@@ -2783,9 +2811,11 @@ export function ChannelMutateDrawer({
                                       />
                                     </FormControl>
                                     <FormDescription>
-                                      {t(
-                                        'Custom API base URL. For official channels, New API has built-in addresses. Only fill this for third-party proxy sites or special endpoints. Do not add /v1 or trailing slash.'
-                                      )}
+                                      {currentChannelTypeHints.baseUrl
+                                        ? t(currentChannelTypeHints.baseUrl)
+                                        : t(
+                                            'Custom API base URL. For official channels, New API has built-in addresses. Only fill this for third-party proxy sites or special endpoints. Do not add /v1 or trailing slash.'
+                                          )}
                                     </FormDescription>
                                     <FormMessage />
                                   </FormItem>
@@ -3606,6 +3636,35 @@ export function ChannelMutateDrawer({
                               )}
                             />
                           </div>
+
+                          <div className='border-border/60 rounded-lg border p-4'>
+                            <FormField
+                              control={form.control}
+                              name='model_group_modes'
+                              render={({ field }) => (
+                                <FormItem className='space-y-3'>
+                                  <div className='space-y-1'>
+                                    <FormLabel>
+                                      {t('Model Group Policies')}
+                                    </FormLabel>
+                                    <FormDescription>
+                                      {t(
+                                        'Per-model group publication. Models without a policy inherit the channel groups.'
+                                      )}
+                                    </FormDescription>
+                                  </div>
+                                  <ChannelModelGroupPolicies
+                                    models={currentModelsArray}
+                                    groupOptions={groupOptions}
+                                    value={field.value ?? []}
+                                    onChange={field.onChange}
+                                    disabled={isSubmitting}
+                                  />
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
                         </div>
                       </ChannelModelsSection>
                     </div>
@@ -4233,9 +4292,7 @@ export function ChannelMutateDrawer({
                                         <SelectValue />
                                       </SelectTrigger>
                                     </FormControl>
-                                    <SelectContent
-                                      alignItemWithTrigger={false}
-                                    >
+                                    <SelectContent alignItemWithTrigger={false}>
                                       <SelectGroup>
                                         <SelectItem value='auto'>
                                           {t('Auto')}

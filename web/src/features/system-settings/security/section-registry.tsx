@@ -22,6 +22,7 @@ import { SSRFSection } from '../request-limits/ssrf-section'
 import { TokenLimitSection } from '../request-limits/token-limit-section'
 import type { SecuritySettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { LLMReviewSection } from './llm-review-section'
 
 const SECURITY_SECTIONS = [
   {
@@ -89,6 +90,13 @@ const SECURITY_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    // The review config comes from the dedicated /api/llm_review API, not
+    // the option loader, so no SecuritySettings defaults are needed.
+    id: 'llm-review',
+    titleKey: 'LLM Compliance Review',
+    build: () => <LLMReviewSection />,
   },
 ] as const
 
