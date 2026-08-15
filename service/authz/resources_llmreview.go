@@ -23,7 +23,7 @@ func init() {
 			{
 				Action:         ActionRead,
 				LabelKey:       "Manage LLM review tasks",
-				DescriptionKey: "View compliance review records, details and queue status, and retry or create review tasks after secure verification.",
+				DescriptionKey: "View compliance review records, details and queue status, and retry or create review tasks.",
 				// Empty DefaultRoles: no built-in role receives this action.
 				// The root superuser remains implicitly allowed; every other
 				// role must be granted it explicitly.

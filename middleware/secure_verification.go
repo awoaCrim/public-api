@@ -9,8 +9,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// SecureVerificationRequired protects channel key disclosure. Other sensitive
-// operations validate their narrower proof scopes in their controller.
+// SecureVerificationRequired is retained for callers that explicitly choose
+// to enforce a channel-key proof. Other sensitive operations validate their
+// narrower proof scopes in their controller.
 func SecureVerificationRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !RequireSecurityProof(c, "channel.key.read", []string{"2fa", "passkey"}) {

@@ -24,30 +24,23 @@ import type {
 } from '../secure-verification/types'
 import type { ApiResponse, PasskeyOptionsPayload, PasskeyStatus } from './types'
 
-function proofHeaders(proofToken?: string): Record<string, string> | undefined {
-  return proofToken ? { 'X-Security-Proof': proofToken } : undefined
-}
-
 export async function getPasskeyStatus(): Promise<ApiResponse<PasskeyStatus>> {
   const res = await api.get<ApiResponse<PasskeyStatus>>('/api/user/passkey')
   return res.data
 }
 
-export async function beginPasskeyRegistration(
-  proofToken?: string
-): Promise<ApiResponse<PasskeyOptionsPayload>> {
+export async function beginPasskeyRegistration(): Promise<
+  ApiResponse<PasskeyOptionsPayload>
+> {
   const res = await api.post<ApiResponse<PasskeyOptionsPayload>>(
-    '/api/user/passkey/register/begin',
-    undefined,
-    { headers: proofHeaders(proofToken) }
+    '/api/user/passkey/register/begin'
   )
   return res.data
 }
 
 export async function finishPasskeyRegistration(
   flowToken: string,
-  payload: Record<string, unknown>,
-  proofToken?: string
+  payload: Record<string, unknown>
 ): Promise<ApiResponse> {
   const res = await api.post<ApiResponse>(
     '/api/user/passkey/register/finish',
@@ -55,14 +48,13 @@ export async function finishPasskeyRegistration(
       flow_token: flowToken,
       credential: payload,
     },
-    { headers: proofHeaders(proofToken), acceptAuthRotation: true }
+    { acceptAuthRotation: true }
   )
   return res.data
 }
 
-export async function deletePasskey(proofToken?: string): Promise<ApiResponse> {
+export async function deletePasskey(): Promise<ApiResponse> {
   const res = await api.delete<ApiResponse>('/api/user/passkey', {
-    headers: proofHeaders(proofToken),
     acceptAuthRotation: true,
   })
   return res.data

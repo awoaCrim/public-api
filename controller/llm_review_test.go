@@ -121,59 +121,46 @@ func TestUpdateLLMReviewConfigInvalidatesSchemaOnCriticalChange(t *testing.T) {
 	assert.Equal(t, "https://new.example.com", baseURLOption.Value)
 }
 
-func TestGetLLMReviewTaskDetailRequiresProof(t *testing.T) {
-	originalSecret := common.CryptoSecret
-	common.CryptoSecret = "llm-review-controller-test"
-	t.Cleanup(func() { common.CryptoSecret = originalSecret })
-	originalSessionSecret := common.SessionSecret
-	common.SessionSecret = "llm-review-proof-secret"
-	t.Cleanup(func() { common.SessionSecret = originalSessionSecret })
-
+func TestGetLLMReviewTaskDetailDoesNotRequireProof(t *testing.T) {
 	useLLMReviewControllerTestDB(t)
 
-	identity := service.AuthIdentity{
-		UserID: 7, SessionID: "proof-session", UserAuthVersion: 1, SessionVersion: 1,
-	}
-	wrongScopeProof, _, err := service.IssueSecurityProof(identity, "2fa", []string{securityProofScopePasskeyDelete})
-	require.NoError(t, err)
-	validProof, _, err := service.IssueSecurityProof(identity, "2fa", []string{securityProofScopeLLMReviewRead})
-	require.NoError(t, err)
-
 	tests := []struct {
-		name         string
-		proof        string
-		expectedCode string
+		name  string
+		proof string
 	}{
-		{"missing proof", "", "SECURITY_PROOF_REQUIRED"},
-		{"wrong scope proof", wrongScopeProof, "SECURITY_PROOF_SCOPE_MISMATCH"},
+		{name: "missing proof"},
+		{name: "arbitrary proof header", proof: "not-a-security-proof"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c, w := newLLMReviewGinContext(t, http.MethodGet, "/api/llm_review/tasks/1", "")
-			c.Set("id", 7)
-			c.Set("session_id", "proof-session")
-			c.Set("auth_version", int64(1))
-			c.Set("session_version", int64(1))
 			if tt.proof != "" {
 				c.Request.Header.Set("X-Security-Proof", tt.proof)
 			}
+
 			GetLLMReviewTaskDetail(c)
-			assert.Equal(t, http.StatusForbidden, w.Code)
-			assert.Contains(t, w.Body.String(), tt.expectedCode)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), "task not found")
+			assert.NotContains(t, w.Body.String(), "SECURITY_PROOF")
 		})
 	}
+}
 
-	// A valid proof proceeds past the gate; with no stored task the handler
-	// answers "task not found" without touching sensitive content.
-	c, w := newLLMReviewGinContext(t, http.MethodGet, "/api/llm_review/tasks/1", "")
-	c.Set("id", 7)
-	c.Set("session_id", "proof-session")
-	c.Set("auth_version", int64(1))
-	c.Set("session_version", int64(1))
-	c.Request.Header.Set("X-Security-Proof", validProof)
-	GetLLMReviewTaskDetail(c)
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "task not found")
+func TestRetryLLMReviewTaskDoesNotRequireProof(t *testing.T) {
+	useLLMReviewControllerTestDB(t)
+
+	for _, proof := range []string{"", "not-a-security-proof"} {
+		c, w := newLLMReviewGinContext(t, http.MethodPost, "/api/llm_review/tasks/1/retry", "")
+		if proof != "" {
+			c.Request.Header.Set("X-Security-Proof", proof)
+		}
+
+		RetryLLMReviewTask(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.NotContains(t, w.Body.String(), "SECURITY_PROOF")
+	}
 }
 
 func TestListLLMReviewTasksReturnsRows(t *testing.T) {

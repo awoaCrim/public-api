@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -15,20 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
-
-// llmReviewProofScope is the secondary-verification scope for reading review
-// details and mutating review tasks. It mirrors the llm_review.read authz
-// permission.
-const llmReviewProofScope = securityProofScopeLLMReviewRead
-
-// llmReviewAccessMethods are the accepted secondary verification methods.
-var llmReviewAccessMethods = []string{"2fa", "passkey"}
-
-// requireLLMReviewProof enforces the secondary proof for detail reads and
-// mutations. The authorization permission is enforced by the router.
-func requireLLMReviewProof(c *gin.Context) bool {
-	return middleware.RequireSecurityProof(c, llmReviewProofScope, llmReviewAccessMethods)
-}
 
 // LLMReviewConfigResponse is the review configuration response. The API key is
 // only ever returned as a tail-derived mask.
@@ -513,15 +498,12 @@ func llmReviewTaskDetail(task *model.LLMReviewTask, attempts []*model.LLMReviewA
 	return h
 }
 
-// GetLLMReviewTaskDetail returns full task details with attempts. Requires
-// the secondary proof (the router enforces the permission).
+// GetLLMReviewTaskDetail returns full task details with attempts. The router
+// enforces the llm_review.read permission.
 func GetLLMReviewTaskDetail(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		common.ApiErrorI18n(c, "common.invalid_params")
-		return
-	}
-	if !requireLLMReviewProof(c) {
 		return
 	}
 	task, err := model.GetLLMReviewTask(id)
@@ -542,15 +524,12 @@ func GetLLMReviewTaskDetail(c *gin.Context) {
 	common.ApiSuccess(c, llmReviewTaskDetail(task, attempts))
 }
 
-// RetryLLMReviewTask re-queues a failed/uncertain task. Requires the
-// secondary proof.
+// RetryLLMReviewTask re-queues a failed/uncertain task. The router enforces
+// the llm_review.read permission.
 func RetryLLMReviewTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		common.ApiErrorI18n(c, "common.invalid_params")
-		return
-	}
-	if !requireLLMReviewProof(c) {
 		return
 	}
 	if err := model.RetryLLMReviewTask(id); err != nil {
@@ -605,15 +584,12 @@ type CreateLLMReviewTaskRequest struct {
 	RequestSnippet string `json:"request_snippet"`
 }
 
-// CreateLLMReviewTask manually enqueues a review task. Requires the secondary
-// proof.
+// CreateLLMReviewTask manually enqueues a review task. The router enforces
+// the llm_review.read permission.
 func CreateLLMReviewTask(c *gin.Context) {
 	var req CreateLLMReviewTaskRequest
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
 		common.ApiErrorI18n(c, "common.invalid_params")
-		return
-	}
-	if !requireLLMReviewProof(c) {
 		return
 	}
 	trigger := service.LLMReviewTrigger{

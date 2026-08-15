@@ -73,8 +73,7 @@ func SetApiRouter(router *gin.Engine) {
 
 		// LLM compliance review management. Configuration and capability
 		// tests are root-only; task list/detail/retry/summary require the
-		// llm_review.read permission (no built-in role baseline) plus a
-		// secondary 2FA/passkey proof inside the sensitive handlers.
+		// llm_review.read permission (no built-in role baseline).
 		llmReviewConfigRoute := apiRouter.Group("/llm_review")
 		llmReviewConfigRoute.Use(middleware.RootAuth())
 		{

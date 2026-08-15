@@ -65,10 +65,6 @@ func PasskeyRegisterBegin(c *gin.Context) {
 		return
 	}
 
-	if !requirePasskeyRegistrationVerification(c, user.Id) {
-		return
-	}
-
 	credential, err := model.GetPasskeyByUserID(user.Id)
 	if err != nil && !errors.Is(err, model.ErrPasskeyNotFound) {
 		common.ApiError(c, err)
@@ -99,7 +95,7 @@ func PasskeyRegisterBegin(c *gin.Context) {
 
 	identity, ok := middleware.GetSessionAuthIdentity(c)
 	if !ok {
-		common.ApiError(c, errors.New("当前认证方式不支持安全验证"))
+		common.ApiError(c, errors.New("Passkey 账户管理需要浏览器登录会话"))
 		return
 	}
 	flowToken, expiresAt, err := passkeysvc.CreateSessionDataFlow(
@@ -142,10 +138,6 @@ func PasskeyRegisterFinish(c *gin.Context) {
 		})
 		return
 	}
-	if !requirePasskeyRegistrationVerification(c, user.Id) {
-		return
-	}
-
 	request, err := parsePasskeyFinishRequest(c)
 	if err != nil {
 		common.ApiError(c, err)
@@ -174,7 +166,7 @@ func PasskeyRegisterFinish(c *gin.Context) {
 
 	identity, ok := middleware.GetSessionAuthIdentity(c)
 	if !ok {
-		common.ApiError(c, errors.New("当前认证方式不支持安全验证"))
+		common.ApiError(c, errors.New("Passkey 账户管理需要浏览器登录会话"))
 		return
 	}
 	sessionData, _, err := passkeysvc.PopSessionDataFlow(
@@ -229,13 +221,13 @@ func PasskeyDelete(c *gin.Context) {
 		return
 	}
 
-	if !requirePasskeyDeleteVerification(c, user.Id) {
+	if !requirePasskeyExists(c, user.Id) {
 		return
 	}
 
 	identity, ok := middleware.GetSessionAuthIdentity(c)
 	if !ok {
-		common.ApiError(c, errors.New("当前认证方式不支持安全验证"))
+		common.ApiError(c, errors.New("Passkey 账户管理需要浏览器登录会话"))
 		return
 	}
 	if err := model.DeletePasskeyByUserIDWithAuthVersion(user.Id); err != nil {
@@ -667,40 +659,18 @@ func getAuthenticatedUser(c *gin.Context) (*model.User, error) {
 	return user, nil
 }
 
-func requirePasskeyRegistrationVerification(c *gin.Context, userID int) bool {
-	twoFA, err := model.GetTwoFAByUserId(userID)
-	if err != nil {
-		common.ApiError(c, err)
-		return false
-	}
-	if twoFA == nil || !twoFA.IsEnabled {
+func requirePasskeyExists(c *gin.Context, userID int) bool {
+	_, err := model.GetPasskeyByUserID(userID)
+	if err == nil {
 		return true
 	}
-	return middleware.RequireSecurityProof(c, securityProofScopePasskeyRegister, []string{secureVerificationMethod2FA})
-}
-
-func requirePasskeyDeleteVerification(c *gin.Context, userID int) bool {
-	twoFA, err := model.GetTwoFAByUserId(userID)
-	if err != nil {
-		common.ApiError(c, err)
+	if errors.Is(err, model.ErrPasskeyNotFound) {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "该用户尚未绑定 Passkey",
+		})
 		return false
 	}
-	if twoFA != nil && twoFA.IsEnabled {
-		return middleware.RequireSecurityProof(c, securityProofScopePasskeyDelete, []string{secureVerificationMethod2FA})
-	}
-
-	_, err = model.GetPasskeyByUserID(userID)
-	if err != nil {
-		if errors.Is(err, model.ErrPasskeyNotFound) {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "该用户尚未绑定 Passkey",
-			})
-			return false
-		}
-		common.ApiError(c, err)
-		return false
-	}
-
-	return middleware.RequireSecurityProof(c, securityProofScopePasskeyDelete, []string{secureVerificationMethodPasskey})
+	common.ApiError(c, err)
+	return false
 }
