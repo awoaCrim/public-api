@@ -2,11 +2,13 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -65,6 +67,18 @@ func UserCheckin(userId int) (*Checkin, error) {
 	}
 	if hasChecked {
 		return nil, errors.New("今日已签到")
+	}
+
+	if setting.BalanceThresholdEnabled {
+		quota, err := GetUserQuota(userId, true)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrCheckinBalanceRead, err)
+		}
+		if decimal.NewFromInt(int64(quota)).GreaterThanOrEqual(
+			operation_setting.GetCheckinBalanceThresholdQuota(),
+		) {
+			return nil, ErrCheckinBalanceThreshold
+		}
 	}
 
 	// 计算随机额度奖励

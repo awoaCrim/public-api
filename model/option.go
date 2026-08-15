@@ -213,6 +213,10 @@ func validateOptionValue(key string, value string) error {
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)
 	}
+	if key == "checkin_setting.balance_threshold" {
+		_, err := operation_setting.ParseCheckinBalanceThreshold(value)
+		return err
+	}
 	return nil
 }
 
@@ -279,6 +283,22 @@ func updateOptionMap(key string, value string) (err error) {
 		delete(common.OptionMap, key)
 		common.OptionMapRWMutex.Unlock()
 		return nil
+	}
+	if key == "checkin_setting.balance_threshold" {
+		if err := validateOptionValue(key, value); err != nil {
+			common.OptionMapRWMutex.Lock()
+			if common.OptionMap == nil {
+				common.OptionMap = make(map[string]string)
+			}
+			common.OptionMap[key] = strconv.FormatFloat(
+				operation_setting.DefaultCheckinBalanceThreshold,
+				'f',
+				-1,
+				64,
+			)
+			common.OptionMapRWMutex.Unlock()
+			return err
+		}
 	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()

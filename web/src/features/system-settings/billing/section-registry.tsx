@@ -197,6 +197,9 @@ const BILLING_SECTIONS = [
           enabled: settings['checkin_setting.enabled'],
           minQuota: settings['checkin_setting.min_quota'],
           maxQuota: settings['checkin_setting.max_quota'],
+          balanceThresholdEnabled:
+            settings['checkin_setting.balance_threshold_enabled'],
+          balanceThreshold: settings['checkin_setting.balance_threshold'],
         }}
       />
     ),

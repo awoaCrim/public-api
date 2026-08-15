@@ -16,6 +16,12 @@ type ConfigManager struct {
 	mutex   sync.RWMutex
 }
 
+// ValueValidator lets a config reject a value before reflection mutates it.
+// It is intentionally small so legacy config modules keep generic behavior.
+type ValueValidator interface {
+	ValidateConfigValue(key, value string) error
+}
+
 var GlobalConfig = NewConfigManager()
 
 func NewConfigManager() *ConfigManager {
@@ -193,6 +199,15 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 		strValue, ok := configMap[key]
 		if !ok {
 			continue
+		}
+
+		// Validate before reflection mutates the live configuration. This is
+		// also used when startup loads legacy persisted options, where the
+		// generic parser otherwise silently ignores malformed values.
+		if validator, ok := config.(ValueValidator); ok {
+			if err := validator.ValidateConfigValue(key, strValue); err != nil {
+				return err
+			}
 		}
 
 		// 根据字段类型设置值

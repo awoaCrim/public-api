@@ -186,6 +186,7 @@ checkin.disabled: "簽到功能未啟用"
 checkin.already_today: "今日已簽到"
 checkin.failed: "簽到失敗，請稍後重試"
 checkin.quota_failed: "簽到失敗：更新額度出錯"
+checkin.balance_threshold: "目前餘額已達到設定的門檻，暫時無法簽到"
 
 # Passkey messages
 passkey.create_failed: "無法建立 Passkey 憑證"

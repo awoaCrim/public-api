@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 
 import {
   SettingsForm,
@@ -43,13 +44,21 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 
-const schema = z.object({
-  enabled: z.boolean(),
-  minQuota: z.coerce.number().int().min(0),
-  maxQuota: z.coerce.number().int().min(0),
-})
+const createSchema = (translate: (key: string) => string) =>
+  z.object({
+    enabled: z.boolean(),
+    minQuota: z.coerce.number().int().min(0),
+    maxQuota: z.coerce.number().int().min(0),
+    balanceThresholdEnabled: z.boolean(),
+    balanceThreshold: z.coerce
+      .number()
+      .finite()
+      .refine((value) => value > 0, {
+        message: translate('Check-in balance threshold must be greater than 0'),
+      }),
+  })
 
-type Values = z.infer<typeof schema>
+type Values = z.infer<ReturnType<typeof createSchema>>
 
 export function CheckinSettingsSection({
   defaultValues,
@@ -58,10 +67,13 @@ export function CheckinSettingsSection({
     enabled: boolean
     minQuota: number
     maxQuota: number
+    balanceThresholdEnabled: boolean
+    balanceThreshold: number
   }
 }) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const schema = createSchema(t)
 
   const form = useForm<Values>({
     resolver: zodResolver(schema) as unknown as Resolver<Values>,
@@ -69,11 +81,18 @@ export function CheckinSettingsSection({
       enabled: defaultValues.enabled,
       minQuota: defaultValues.minQuota,
       maxQuota: defaultValues.maxQuota,
+      balanceThresholdEnabled: defaultValues.balanceThresholdEnabled,
+      balanceThreshold: defaultValues.balanceThreshold,
     },
   })
 
   const { isDirty, isSubmitting } = form.formState
   const enabled = form.watch('enabled')
+  const balanceThresholdEnabled = form.watch('balanceThresholdEnabled')
+  const currencyDisplay = getCurrencyDisplay()
+  const currencyLabel = getCurrencyLabel()
+  const thresholdUnitLabel =
+    currencyDisplay.config.quotaDisplayType === 'TOKENS' ? 'USD' : currencyLabel
 
   async function onSubmit(values: Values) {
     const updates: Array<{ key: string; value: string }> = []
@@ -96,6 +115,22 @@ export function CheckinSettingsSection({
       updates.push({
         key: 'checkin_setting.max_quota',
         value: String(values.maxQuota),
+      })
+    }
+
+    if (
+      values.balanceThresholdEnabled !== defaultValues.balanceThresholdEnabled
+    ) {
+      updates.push({
+        key: 'checkin_setting.balance_threshold_enabled',
+        value: String(values.balanceThresholdEnabled),
+      })
+    }
+
+    if (values.balanceThreshold !== defaultValues.balanceThreshold) {
+      updates.push({
+        key: 'checkin_setting.balance_threshold',
+        value: String(values.balanceThreshold),
       })
     }
 
@@ -131,6 +166,32 @@ export function CheckinSettingsSection({
                   <FormDescription>
                     {t(
                       'Allow users to check in daily for random quota rewards'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                    disabled={updateOption.isPending || isSubmitting}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='balanceThresholdEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>
+                    {t('Enable check-in balance threshold')}
+                  </FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Only users with a current balance below the threshold can check in'
                     )}
                   </FormDescription>
                 </SettingsSwitchContent>
@@ -191,6 +252,37 @@ export function CheckinSettingsSection({
                 )}
               />
             </div>
+          )}
+
+          {balanceThresholdEnabled && (
+            <FormField
+              control={form.control}
+              name='balanceThreshold'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Check-in balance threshold')} ({thresholdUnitLabel})
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={0}
+                      step='any'
+                      placeholder='1'
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {currencyDisplay.config.quotaDisplayType === 'TOKENS'
+                      ? t('Token display mode interprets this threshold as USD')
+                      : t(
+                          'The saved value follows the current display currency and exchange rate'
+                        )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
           )}
         </SettingsForm>
       </Form>

@@ -1,11 +1,13 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -55,10 +57,18 @@ func DoCheckin(c *gin.Context) {
 
 	checkin, err := model.UserCheckin(userId)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": err.Error(),
-		})
+		switch {
+		case errors.Is(err, model.ErrCheckinBalanceThreshold):
+			common.ApiErrorI18n(c, i18n.MsgCheckinBalanceThreshold)
+		case errors.Is(err, model.ErrCheckinBalanceRead):
+			logger.LogError(c.Request.Context(), fmt.Sprintf("check-in balance read failed for user %d: %v", userId, err))
+			common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+		default:
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+		}
 		return
 	}
 	model.RecordLog(userId, model.LogTypeSystem, fmt.Sprintf("用户签到，获得额度 %s", logger.LogQuota(checkin.QuotaAwarded)))

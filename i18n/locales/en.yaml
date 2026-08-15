@@ -185,6 +185,7 @@ checkin.disabled: "Check-in feature is not enabled"
 checkin.already_today: "Already checked in today"
 checkin.failed: "Check-in failed, please try again later"
 checkin.quota_failed: "Check-in failed: quota update error"
+checkin.balance_threshold: "Check-in is unavailable because your current balance has reached the configured threshold"
 
 # Passkey messages
 passkey.create_failed: "Unable to create Passkey credential"

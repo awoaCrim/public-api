@@ -1191,9 +1191,12 @@ func GetUserQuota(id int, fromDB bool) (quota int, err error) {
 	if !fromDB && common.RedisEnabled {
 		return getUserQuotaCache(id)
 	}
-	err = DB.Model(&User{}).Where("id = ?", id).Select("quota").Find(&quota).Error
-	if err != nil {
-		return 0, err
+	result := DB.Model(&User{}).Where("id = ?", id).Select("quota").Find(&quota)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if fromDB && result.RowsAffected == 0 {
+		return 0, gorm.ErrRecordNotFound
 	}
 
 	return quota, nil
