@@ -2,9 +2,9 @@
 
 > 生成日期：2026-08-15
 > 分支：`rebuild/customizations-20260812`
-> 产品提交：`bd8b8746`（`feat: restore admin observability UX`）；前序完整重建提交为 `da678d51`
+> 产品提交：`9d828d74`（`fix: relax security proofs and restore data assets`）；前序可观测性 UX 提交为 `bd8b8746`，完整重建提交为 `da678d51`
 > 基线：`ccd535ef8e50cf6e5846a59278c40b7ff59d1b7d`（上游 `QuantumNous/new-api`）
-> 部署：2026-08-15 04:25 +08:00 已部署到 `ssh2`，镜像 `newapi-custom:20260815-observability-bd8b8746`，分支已 push 至 `origin/rebuild/customizations-20260812`
+> 部署：2026-08-15 14:56 +08:00 已部署到 `ssh2`，镜像 `newapi-custom:20260815-security-avatar-9d828d74`，分支已 push 至 `origin/rebuild/customizations-20260812`
 
 ## 1. 交付范围
 
@@ -43,7 +43,7 @@
 
 - **请求快照**：默认关闭；内容仅 Root 超级管理员可直接读取，不可委派且不要求 2FA/Passkey proof；仍保留读取审计、HKDF/AES-256-GCM、容量与保留期清理；更换 `CRYPTO_SECRET` 会使旧快照不可读——密钥轮换必须与保留期清理配套（见 inventory §3.5）。
 - **IP 黑名单**：默认关闭（`ip_blacklist_setting.Enabled`）；exact IPv4；root 豁免；Redis + 主库精确回源。
-- **LLM Review**：默认关闭；`llm_review.read` 无默认授权 + 2FA/Passkey proof；配置/测试/清理 root-only；API Key 加密存储。
+- **LLM Review**：默认关闭；`llm_review.read` 无默认授权，管理路由仍要求 AdminAuth、精确权限、关键限流与审计；配置/测试/清理 root-only；API Key 加密存储。管理路由不再强制额外 2FA/Passkey proof。
 - **输入 Token 前置限制**：总开关默认关闭（`max_input_tokens=200000`、`max_output_tokens=10000`）；未过校准验收 fail-open。
 - **Vision 拦截**：用户级默认关闭；SSRF 校验 + 硬边界；失败 fail-open。
 - **渠道模型三态**：`model_group_modes` 归入 `ChannelSensitiveWrite`（fail-closed 字段分类守卫）。
@@ -60,7 +60,7 @@
 
 ## 5. 部署与启用指引
 
-1. **代码部署**：产品提交 `bd8b8746` 已推送至 `origin/rebuild/customizations-20260812`，并于 2026-08-15 04:25 +08:00 构建部署到 `ssh2`；容器镜像为 `newapi-custom:20260815-observability-bd8b8746`，镜像 ID 为 `sha256:bc3a6c51743b88aca6909bbb9d66a063eda666e2331752b7ca4dfd7cf786a794`，`/api/status` 和首页均返回 200，容器运行且重启次数为 0。部署前 SQLite 备份位于 `/opt/newapi/backups/deploy-20260815-042500-bd8b8746`，`PRAGMA integrity_check` 返回 `ok`。
+1. **代码部署**：产品提交 `9d828d74` 已推送至 `origin/rebuild/customizations-20260812`，并于 2026-08-15 14:56 +08:00 构建部署到 `ssh2`；容器镜像为 `newapi-custom:20260815-security-avatar-9d828d74`，镜像 ID 为 `sha256:d2e56d70f7bf4c8921b2c69a87b776e4d03c062422753b87825984214accd891`，`/api/status` 和首页均返回 200，容器运行且重启次数为 0。部署前 SQLite 备份位于 `/opt/newapi/backups/deploy-20260815-145129-9d828d74`，`PRAGMA integrity_check` 返回 `ok`；备份同时保留 Compose、`.env`、旧源码和旧镜像元数据。`https://newapi.uwoacrimson.com/data-assets/anon-removebg-preview.png` 通过公网验证为 HTTP 200、`image/png`、344251 bytes，响应与源文件 SHA-256 一致；缺失文件、POST 和路径穿越请求均为 404。。
 2. **schema**：新表在启动时经 `migrateDB`/`migrateDBFast` 自动创建（`user_group_grants`、`channel_model_group_overrides`、`channel_model_group_disabled`、LLM Review 4 表、IP 黑名单、快照 2 表、日志新列等）。
 3. **旧 routing_groups 数据**：启动诊断发现未映射旧分组 key `渠道1`，因此严格迁移尚未执行，避免静默丢失授权。处理该 key 后按 `docs/routing-group-migration-manual.md` 执行 preview → readiness → run。
 4. **可选功能**均默认关闭：按需在管理端开启（IP 黑名单、LLM Review、输入 Token 前置限制、用户级 Vision）。

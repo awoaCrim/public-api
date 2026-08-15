@@ -1,7 +1,7 @@
 # 交接文档：New API 定制重建
 
 > 更新日期：2026-08-15
-> 交接范围：阶段 1–7、Review remediation、产品提交、推送和 `ssh2` 部署均已完成。最新产品提交：`bd8b8746`（`feat: restore admin observability UX`）；部署镜像：`newapi-custom:20260815-observability-bd8b8746`。分支已推送至 `origin/rebuild/customizations-20260812`；严格 routing-group 迁移因旧 key `渠道1` 阻断而未执行。交付报告：`docs/customization-migration-report.md`；迁移/回滚手册：`docs/routing-group-migration-manual.md`。
+> 交接范围：阶段 1–7、Review remediation、产品提交、推送和 `ssh2` 部署均已完成。最新产品提交：`9d828d74`（`fix: relax security proofs and restore data assets`）；部署镜像：`newapi-custom:20260815-security-avatar-9d828d74`。分支已推送至 `origin/rebuild/customizations-20260812`；严格 routing-group 迁移因旧 key `渠道1` 阻断而未执行；`/data-assets/anon-removebg-preview.png` 已恢复。交付报告：`docs/customization-migration-report.md`；迁移/回滚手册：`docs/routing-group-migration-manual.md`。
 > 接手须知：本文是后续开发者的唯一入口。先读本文，再读 `docs/customization-migration-inventory.md`（功能清单）、`findings.md`（发现与基线验证）、`task_plan.md`（阶段计划）、`progress.md`（进度记录）。
 
 ---
@@ -253,7 +253,8 @@ bun run knip                          # 可选：检查未使用依赖/导出
 ## 8. 当前 git 状态快照
 
 - 分支：`rebuild/customizations-20260812`
-- 产品提交：`bd8b8746`（`feat: restore admin observability UX`）；前序完整重建提交为 `da678d51`。
-- 部署：2026-08-15 04:25 +08:00，`ssh2` 的 `newapi` 容器正在运行镜像 `newapi-custom:20260815-observability-bd8b8746`，镜像 ID 为 `sha256:bc3a6c51743b88aca6909bbb9d66a063eda666e2331752b7ca4dfd7cf786a794`；容器运行、重启次数 0，`/api/status` 和首页均为 HTTP 200。
-- 部署前 SQLite 备份完整性为 `ok`，备份目录：`/opt/newapi/backups/deploy-20260815-042500-bd8b8746`。
+- 产品提交：`9d828d74`（`fix: relax security proofs and restore data assets`）；前序可观测性 UX 提交为 `bd8b8746`，完整重建提交为 `da678d51`。
+- 部署：2026-08-15 14:56 +08:00，`ssh2` 的 `newapi` 容器正在运行镜像 `newapi-custom:20260815-security-avatar-9d828d74`，镜像 ID 为 `sha256:d2e56d70f7bf4c8921b2c69a87b776e4d03c062422753b87825984214accd891`；容器运行、重启次数 0，`/api/status` 和首页均为 HTTP 200。
+- 部署前 SQLite 备份完整性为 `ok`，备份目录：`/opt/newapi/backups/deploy-20260815-145129-9d828d74`；同时保留 Compose、`.env`、旧源码和旧镜像元数据。
+- `/data-assets/anon-removebg-preview.png` 通过公网验证为 HTTP 200、`image/png`、344251 bytes，响应 SHA-256 为 `cb5a7c0d92a842b45f3621fa80e9c852c41caa896ca8bd5f209a81a247a4611b`；缺失文件、POST 和路径穿越请求均为 404。
 - 分支已推送并跟踪 `origin/rebuild/customizations-20260812`。未纳入发布的本地 Agent/Trellis 运行时、任务元数据及 `nul` 仍保留在工作区，具体清单以 `git status` 为准。

@@ -105,6 +105,14 @@
 - 部署前备份：`/opt/newapi/backups/deploy-20260815-042500-bd8b8746`；SQLite 在线备份 `PRAGMA integrity_check` 返回 `ok`，同时保留 Compose、`.env`、旧源码和旧镜像元数据。
 - `newapi` 容器切换后运行正常、重启次数 0，`/api/status` 与首页均返回 HTTP 200；未修改环境变量，未执行严格 routing-group 迁移。
 
+## 2026-08-15 14:56 +08:00（安全证明放宽与 data-assets 恢复提交、推送与 ssh2 部署）
+
+- 已将渠道 Key、LLM Review 管理操作、Passkey 管理中的强制二次验证/Passkey proof 移除；保留既有认证、权限、Root/Admin 边界、限流、审计、WebAuthn 流程绑定与会话身份校验。产品提交为 `9d828d74`（`fix: relax security proofs and restore data assets`）。
+- 已推送至 `origin/rebuild/customizations-20260812`；从该精确提交构建镜像 `newapi-custom:20260815-security-avatar-9d828d74`，镜像 ID 为 `sha256:d2e56d70f7bf4c8921b2c69a87b776e4d03c062422753b87825984214accd891`。
+- 部署前备份：`/opt/newapi/backups/deploy-20260815-145129-9d828d74`；SQLite 在线备份 `PRAGMA integrity_check` 返回 `ok`，并保留 Compose、`.env`、旧源码和旧镜像元数据。
+- `newapi` 容器切换后运行正常、重启次数 0，`/api/status` 与首页均返回 HTTP 200；未修改环境变量，未执行严格 routing-group 迁移。
+- 已恢复 `https://newapi.uwoacrimson.com/data-assets/anon-removebg-preview.png`：HTTP 200、`image/png`、344251 bytes，响应与 `/opt/newapi/data/anon-removebg-preview.png` SHA-256 一致；HEAD 为 200，缺失文件、POST、路径穿越均为 404。
+
 ## 当前阶段
 
 - 阶段 1–7、独立 Review、Remediation、产品提交、推送和 `ssh2` 部署均已完成。
