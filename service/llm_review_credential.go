@@ -25,6 +25,12 @@ const (
 	reviewKeyNonceSize = 12
 	reviewKeySalt      = "new-api/llm-review-api-key"
 	reviewKeyInfo      = "new-api/llm-review/key-v1"
+
+	// legacyReviewKeyPrefix identifies values written by the previous generic
+	// common.EncryptString envelope. Keep this read-only compatibility path so
+	// existing deployments do not lose their configured review key when the
+	// domain-separated envelope is introduced.
+	legacyReviewKeyPrefix = "v1:"
 )
 
 // ErrReviewSecretNotConfigured means the global crypto secret is missing.
@@ -89,6 +95,9 @@ func DecryptLLMReviewAPIKey(encrypted string) (string, error) {
 	if err != nil {
 		return "", ErrReviewSecretCorrupt
 	}
+	if len(raw) >= len(legacyReviewKeyPrefix) && string(raw[:len(legacyReviewKeyPrefix)]) == legacyReviewKeyPrefix {
+		return decryptLegacyLLMReviewAPIKey(raw)
+	}
 	if len(raw) < len(reviewKeyMagic)+1+reviewKeyNonceSize {
 		return "", ErrReviewSecretCorrupt
 	}
@@ -119,6 +128,35 @@ func DecryptLLMReviewAPIKey(encrypted string) (string, error) {
 	}
 	if len(plain) == 0 {
 		return "", nil
+	}
+	return string(plain), nil
+}
+
+// decryptLegacyLLMReviewAPIKey reads the envelope produced by the previous
+// common.EncryptString implementation. It deliberately supports decryption
+// only; every newly persisted key uses EncryptLLMReviewAPIKey's domain-
+// separated envelope.
+func decryptLegacyLLMReviewAPIKey(raw []byte) (string, error) {
+	if common.CryptoSecret == "" {
+		return "", ErrReviewSecretNotConfigured
+	}
+	key := sha256.Sum256([]byte(common.CryptoSecret))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", ErrReviewSecretCorrupt
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", ErrReviewSecretCorrupt
+	}
+	ciphertext := raw[len(legacyReviewKeyPrefix):]
+	if len(ciphertext) < gcm.NonceSize()+gcm.Overhead() {
+		return "", ErrReviewSecretCorrupt
+	}
+	nonce, body := ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, body, nil)
+	if err != nil {
+		return "", ErrReviewSecretCorrupt
 	}
 	return string(plain), nil
 }

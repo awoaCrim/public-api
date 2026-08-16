@@ -1,6 +1,12 @@
 package service
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"io"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -31,6 +37,37 @@ func TestReviewAPIKeyEmptyRoundtrip(t *testing.T) {
 	plain, err := DecryptLLMReviewAPIKey("")
 	require.NoError(t, err)
 	assert.Empty(t, plain)
+}
+
+func TestReviewAPIKeyDecryptsLegacyEnvelope(t *testing.T) {
+	original := common.CryptoSecret
+	common.CryptoSecret = "llm-review-test-secret"
+	t.Cleanup(func() { common.CryptoSecret = original })
+
+	legacy, err := encryptLegacyReviewAPIKeyForTest("sk-legacy-key")
+	require.NoError(t, err)
+
+	plain, err := DecryptLLMReviewAPIKey(legacy)
+	require.NoError(t, err)
+	assert.Equal(t, "sk-legacy-key", plain)
+}
+
+func encryptLegacyReviewAPIKeyForTest(plain string) (string, error) {
+	key := sha256.Sum256([]byte(common.CryptoSecret))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(plain), nil)
+	return base64.StdEncoding.EncodeToString(append([]byte("v1:"), sealed...)), nil
 }
 
 func TestReviewAPIKeyRejectsTamperedEnvelope(t *testing.T) {
