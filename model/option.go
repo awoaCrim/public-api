@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -13,12 +14,39 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/requestsnapshot_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	sqlitedriver "github.com/glebarez/go-sqlite"
 	"gorm.io/gorm"
 )
 
 type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
 	Value string `json:"value"`
+}
+
+const (
+	// SQLite extended busy codes keep SQLITE_BUSY (5) in their low byte. In
+	// particular, SQLITE_BUSY_SNAPSHOT (517) is returned when a deferred read
+	// transaction tries to upgrade an old WAL snapshot into a writer.
+	sqliteBusyBaseCode       = 5
+	sqliteWriteRetryAttempts = 5
+	sqliteWriteRetryDelay    = 25 * time.Millisecond
+)
+
+func isSQLiteBusyError(err error) bool {
+	var sqliteErr *sqlitedriver.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqliteBusyBaseCode
+}
+
+func retrySQLiteWrite(operation func() error) error {
+	var err error
+	for attempt := 0; attempt < sqliteWriteRetryAttempts; attempt++ {
+		err = operation()
+		if !isSQLiteBusyError(err) || attempt == sqliteWriteRetryAttempts-1 {
+			return err
+		}
+		time.Sleep(sqliteWriteRetryDelay * time.Duration(1<<attempt))
+	}
+	return err
 }
 
 func AllOption() ([]*Option, error) {
@@ -253,18 +281,20 @@ func UpdateOptionsBulk(values map[string]string) error {
 			return err
 		}
 	}
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		for k, v := range values {
-			option := Option{Key: k}
-			if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
-				return err
+	err := retrySQLiteWrite(func() error {
+		return DB.Transaction(func(tx *gorm.DB) error {
+			for k, v := range values {
+				option := Option{Key: k}
+				if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
+					return err
+				}
+				option.Value = v
+				if err := tx.Save(&option).Error; err != nil {
+					return err
+				}
 			}
-			option.Value = v
-			if err := tx.Save(&option).Error; err != nil {
-				return err
-			}
-		}
-		return nil
+			return nil
+		})
 	})
 	if err != nil {
 		return err
