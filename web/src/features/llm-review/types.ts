@@ -32,6 +32,11 @@ export type ReviewTriggerStage = 'preflight' | 'postflight'
 
 export type ReviewVerdict = 'violation' | 'compliant' | 'uncertain'
 
+export type StructuredOutputMode =
+  | 'strict_schema'
+  | 'json_object'
+  | 'prompt_json'
+
 export type ReviewCategory =
   | 'commercial_use'
   | 'account_sharing'
@@ -108,6 +113,7 @@ export interface ReviewTask {
   policy_id?: string
   prompt_template_version?: string
   schema_version?: string
+  output_mode?: StructuredOutputMode
   human_override?: string
   attempts?: ReviewAttempt[]
 }
@@ -124,6 +130,14 @@ export interface ReviewSchemaStatus {
   status: 'untested' | 'passed' | 'failed'
   tested: boolean
   supports_strict_json_schema: boolean
+  structured_output_mode: StructuredOutputMode
+  structured_output_tested: boolean
+  structured_output_tested_at: number
+  structured_output_tested_model: string
+  structured_output_version: string
+  policy_configured: boolean
+  ready: boolean
+  readiness_reason: string
   tested_at: number
   tested_model: string
   schema_version: string
@@ -154,6 +168,14 @@ export interface LLMReviewConfig {
   max_output_tokens: number
   allow_private_url: boolean
   schema_tested: boolean
+  structured_output_mode: StructuredOutputMode
+  structured_output_tested: boolean
+  structured_output_tested_at: number
+  structured_output_tested_model: string
+  structured_output_version: string
+  policy_configured: boolean
+  readiness_ready: boolean
+  readiness_reason: string
 }
 
 export interface LLMReviewConfigUpdate {
@@ -172,6 +194,7 @@ export interface LLMReviewConfigUpdate {
   retention_days: number
   max_output_tokens: number
   allow_private_url: boolean
+  structured_output_mode?: StructuredOutputMode
 }
 
 export interface GetReviewTasksParams {

@@ -18,22 +18,30 @@ import (
 // LLMReviewConfigResponse is the review configuration response. The API key is
 // only ever returned as a tail-derived mask.
 type LLMReviewConfigResponse struct {
-	Enabled              bool    `json:"enabled"`
-	BaseURL              string  `json:"base_url"`
-	APIKey               string  `json:"api_key"`
-	ModelName            string  `json:"model"`
-	PolicyText           string  `json:"policy_text"`
-	TimeoutSeconds       int     `json:"timeout_seconds"`
-	MaxAttempts          int     `json:"max_attempts"`
-	RetryIntervalSeconds int     `json:"retry_interval_seconds"`
-	WorkerConcurrency    int     `json:"worker_concurrency"`
-	ConfidenceThreshold  float64 `json:"confidence_threshold"`
-	CompliantLimit       int     `json:"compliant_limit"`
-	ImmuneHours          int     `json:"immune_hours"`
-	RetentionDays        int     `json:"retention_days"`
-	MaxOutputTokens      int     `json:"max_output_tokens"`
-	AllowPrivateURL      bool    `json:"allow_private_url"`
-	SchemaTested         bool    `json:"schema_tested"`
+	Enabled                     bool    `json:"enabled"`
+	BaseURL                     string  `json:"base_url"`
+	APIKey                      string  `json:"api_key"`
+	ModelName                   string  `json:"model"`
+	PolicyText                  string  `json:"policy_text"`
+	TimeoutSeconds              int     `json:"timeout_seconds"`
+	MaxAttempts                 int     `json:"max_attempts"`
+	RetryIntervalSeconds        int     `json:"retry_interval_seconds"`
+	WorkerConcurrency           int     `json:"worker_concurrency"`
+	ConfidenceThreshold         float64 `json:"confidence_threshold"`
+	CompliantLimit              int     `json:"compliant_limit"`
+	ImmuneHours                 int     `json:"immune_hours"`
+	RetentionDays               int     `json:"retention_days"`
+	MaxOutputTokens             int     `json:"max_output_tokens"`
+	AllowPrivateURL             bool    `json:"allow_private_url"`
+	SchemaTested                bool    `json:"schema_tested"`
+	StructuredOutputMode        string  `json:"structured_output_mode"`
+	StructuredOutputTested      bool    `json:"structured_output_tested"`
+	StructuredOutputTestedAt    int64   `json:"structured_output_tested_at"`
+	StructuredOutputTestedModel string  `json:"structured_output_tested_model"`
+	StructuredOutputVersion     string  `json:"structured_output_version"`
+	PolicyConfigured            bool    `json:"policy_configured"`
+	ReadinessReady              bool    `json:"readiness_ready"`
+	ReadinessReason             string  `json:"readiness_reason"`
 }
 
 // LLMReviewConfigUpdateRequest updates the review configuration. An empty or
@@ -43,7 +51,8 @@ type LLMReviewConfigUpdateRequest struct {
 	BaseURL              string   `json:"base_url"`
 	APIKey               string   `json:"api_key"`
 	ModelName            string   `json:"model"`
-	PolicyText           string   `json:"policy_text"`
+	PolicyText           *string  `json:"policy_text"`
+	StructuredOutputMode *string  `json:"structured_output_mode"`
 	TimeoutSeconds       *int     `json:"timeout_seconds"`
 	MaxAttempts          *int     `json:"max_attempts"`
 	RetryIntervalSeconds *int     `json:"retry_interval_seconds"`
@@ -59,6 +68,16 @@ type LLMReviewConfigUpdateRequest struct {
 // GetLLMReviewConfig returns the review configuration (root).
 func GetLLMReviewConfig(c *gin.Context) {
 	cfg := operation_setting.GetLLMReviewSetting()
+	readiness := operation_setting.GetReviewReadiness(cfg)
+	structuredTestedAt := cfg.StructuredOutputTestedAt
+	structuredTestedModel := cfg.StructuredOutputTestedModel
+	structuredVersion := cfg.StructuredOutputVersion
+	if !cfg.StructuredOutputTested && cfg.SchemaTested {
+		// Older installations only persisted the strict capability fields.
+		structuredTestedAt = cfg.SchemaTestedAt
+		structuredTestedModel = cfg.SchemaTestedModel
+		structuredVersion = cfg.SchemaVersion
+	}
 	maskedKey := ""
 	if cfg.APIKeyEncrypted != "" {
 		if plain, err := service.DecryptLLMReviewAPIKey(cfg.APIKeyEncrypted); err == nil {
@@ -66,30 +85,38 @@ func GetLLMReviewConfig(c *gin.Context) {
 		}
 	}
 	resp := LLMReviewConfigResponse{
-		Enabled:              cfg.Enabled,
-		BaseURL:              cfg.BaseURL,
-		APIKey:               maskedKey,
-		ModelName:            cfg.ModelName,
-		PolicyText:           cfg.PolicyText,
-		TimeoutSeconds:       cfg.TimeoutSeconds,
-		MaxAttempts:          cfg.MaxAttempts,
-		RetryIntervalSeconds: cfg.RetryIntervalSeconds,
-		WorkerConcurrency:    cfg.WorkerConcurrency,
-		ConfidenceThreshold:  cfg.AutoBanConfidence,
-		CompliantLimit:       cfg.MaxCompliantCount,
-		ImmuneHours:          cfg.GracePeriodHours,
-		RetentionDays:        cfg.LogRetentionDays,
-		MaxOutputTokens:      cfg.MaxOutputTokens,
-		AllowPrivateURL:      cfg.AllowPrivateAddress,
-		SchemaTested:         cfg.SchemaTested,
+		Enabled:                     cfg.Enabled,
+		BaseURL:                     cfg.BaseURL,
+		APIKey:                      maskedKey,
+		ModelName:                   cfg.ModelName,
+		PolicyText:                  cfg.PolicyText,
+		TimeoutSeconds:              cfg.TimeoutSeconds,
+		MaxAttempts:                 cfg.MaxAttempts,
+		RetryIntervalSeconds:        cfg.RetryIntervalSeconds,
+		WorkerConcurrency:           cfg.WorkerConcurrency,
+		ConfidenceThreshold:         cfg.AutoBanConfidence,
+		CompliantLimit:              cfg.MaxCompliantCount,
+		ImmuneHours:                 cfg.GracePeriodHours,
+		RetentionDays:               cfg.LogRetentionDays,
+		MaxOutputTokens:             cfg.MaxOutputTokens,
+		AllowPrivateURL:             cfg.AllowPrivateAddress,
+		SchemaTested:                cfg.SchemaTested,
+		StructuredOutputMode:        operation_setting.EffectiveStructuredOutputMode(cfg),
+		StructuredOutputTested:      cfg.StructuredOutputTested || cfg.SchemaTested,
+		StructuredOutputTestedAt:    structuredTestedAt,
+		StructuredOutputTestedModel: structuredTestedModel,
+		StructuredOutputVersion:     structuredVersion,
+		PolicyConfigured:            readiness.PolicyConfigured,
+		ReadinessReady:              readiness.Ready,
+		ReadinessReason:             readiness.Reason,
 	}
 	common.ApiSuccess(c, resp)
 }
 
 // UpdateLLMReviewConfig updates the review configuration (root, dedicated
-// endpoint). Critical config changes reset the schema capability state, and
-// enabling requires a fully configured service whose current critical config
-// passed the strict schema capability test.
+// endpoint). Critical config changes reset the structured-output capability
+// state, and enabling requires a fully configured service whose current
+// critical config passed a structured-output capability test.
 func UpdateLLMReviewConfig(c *gin.Context) {
 	var req LLMReviewConfigUpdateRequest
 	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
@@ -101,6 +128,9 @@ func UpdateLLMReviewConfig(c *gin.Context) {
 	updates := map[string]string{}
 	schemaInvalidated := false
 	candidate := *cfg
+	if req.Enabled != nil {
+		candidate.Enabled = *req.Enabled
+	}
 
 	if req.AllowPrivateURL != nil {
 		candidate.AllowPrivateAddress = *req.AllowPrivateURL
@@ -132,9 +162,23 @@ func UpdateLLMReviewConfig(c *gin.Context) {
 			schemaInvalidated = true
 		}
 	}
-	if req.PolicyText != "" {
-		candidate.PolicyText = req.PolicyText
-		updates["llm_review_setting.policy_text"] = req.PolicyText
+	if req.PolicyText != nil {
+		candidate.PolicyText = *req.PolicyText
+		updates["llm_review_setting.policy_text"] = *req.PolicyText
+	}
+	if req.StructuredOutputMode != nil {
+		mode := *req.StructuredOutputMode
+		if mode != operation_setting.StructuredOutputModeStrictSchema && mode != operation_setting.StructuredOutputModeJSONObject && mode != operation_setting.StructuredOutputModePromptJSON {
+			common.ApiErrorMsg(c, "unsupported structured output mode")
+			return
+		}
+		candidate.StructuredOutputMode = mode
+		if mode != operation_setting.EffectiveStructuredOutputMode(cfg) {
+			updates["llm_review_setting.structured_output_mode"] = mode
+			schemaInvalidated = true
+		} else if cfg.StructuredOutputMode == "" {
+			updates["llm_review_setting.structured_output_mode"] = mode
+		}
 	}
 	if req.TimeoutSeconds != nil {
 		candidate.TimeoutSeconds = *req.TimeoutSeconds
@@ -177,20 +221,35 @@ func UpdateLLMReviewConfig(c *gin.Context) {
 		updates["llm_review_setting.max_output_tokens"] = strconv.Itoa(*req.MaxOutputTokens)
 	}
 
-	// Enable validation against the candidate config: fully configured and
-	// schema capability passed for the current critical config.
-	if req.Enabled != nil {
-		if *req.Enabled {
-			if !operation_setting.IsReviewConfigured(&candidate) {
-				common.ApiErrorMsg(c, "review service is not fully configured: base_url and model are required")
-				return
-			}
-			if schemaInvalidated || !candidate.SchemaTested {
-				common.ApiErrorMsg(c, "strict JSON schema capability must pass after the latest critical config changes before enabling the review service")
-				return
-			}
+	// Enable validation is intentionally ordered from basic configuration to
+	// policy to capability so the administrator gets the most actionable setup
+	// error, while an explicit empty policy is still distinguishable from an
+	// omitted field.
+	if req.Enabled != nil && *req.Enabled {
+		if !operation_setting.IsReviewConfigured(&candidate) {
+			common.ApiErrorMsg(c, "review service is not fully configured: base_url and model are required")
+			return
 		}
+		if !operation_setting.IsPolicyConfigured(&candidate) {
+			common.ApiErrorMsg(c, "policy text is required while review is enabled")
+			return
+		}
+		if schemaInvalidated {
+			common.ApiErrorMsg(c, "review service is not ready: structured-output capability test is required after configuration changes")
+			return
+		}
+		if !operation_setting.CanEnableReview(&candidate) {
+			readiness := operation_setting.GetReviewReadiness(&candidate)
+			common.ApiErrorMsg(c, "review service is not ready: "+readiness.Reason)
+			return
+		}
+	}
+	if req.Enabled != nil {
 		updates["llm_review_setting.enabled"] = common.Interface2String(*req.Enabled)
+	}
+	if candidate.Enabled && !operation_setting.IsPolicyConfigured(&candidate) {
+		common.ApiErrorMsg(c, "policy text is required while review is enabled")
+		return
 	}
 
 	if len(updates) == 0 {
@@ -202,6 +261,10 @@ func UpdateLLMReviewConfig(c *gin.Context) {
 		updates["llm_review_setting.schema_tested_at"] = "0"
 		updates["llm_review_setting.schema_tested_model"] = ""
 		updates["llm_review_setting.schema_version"] = ""
+		updates["llm_review_setting.structured_output_tested"] = "false"
+		updates["llm_review_setting.structured_output_tested_at"] = "0"
+		updates["llm_review_setting.structured_output_tested_model"] = ""
+		updates["llm_review_setting.structured_output_version"] = ""
 		updates["llm_review_setting.test_error"] = ""
 	}
 
@@ -225,11 +288,12 @@ func isMaskedAPIKey(key string) bool {
 // reviewCandidateRequest carries unsaved candidate config for connection /
 // schema capability tests.
 type reviewCandidateRequest struct {
-	BaseURL         string `json:"base_url"`
-	APIKey          string `json:"api_key"`
-	ModelName       string `json:"model"`
-	TimeoutSeconds  *int   `json:"timeout_seconds"`
-	AllowPrivateURL *bool  `json:"allow_private_url"`
+	BaseURL              string  `json:"base_url"`
+	APIKey               string  `json:"api_key"`
+	ModelName            string  `json:"model"`
+	StructuredOutputMode *string `json:"structured_output_mode"`
+	TimeoutSeconds       *int    `json:"timeout_seconds"`
+	AllowPrivateURL      *bool   `json:"allow_private_url"`
 }
 
 // applyReviewCandidate overlays the candidate request onto the stored config
@@ -242,6 +306,9 @@ func applyReviewCandidate(cfg *operation_setting.LLMReviewSetting, req reviewCan
 	}
 	if req.ModelName != "" {
 		tmp.ModelName = req.ModelName
+	}
+	if req.StructuredOutputMode != nil {
+		tmp.StructuredOutputMode = *req.StructuredOutputMode
 	}
 	if req.APIKey != "" && !isMaskedAPIKey(req.APIKey) {
 		enc, err := service.EncryptLLMReviewAPIKey(req.APIKey)
@@ -284,9 +351,9 @@ func TestLLMReviewConnection(c *gin.Context) {
 	common.ApiSuccess(c, result)
 }
 
-// TestLLMReviewSchema runs the strict JSON schema capability test (root).
-// A passing test persists the tested critical config and marks it supported;
-// a failing test persists the masked error.
+// TestLLMReviewSchema probes structured-output modes in order (root). A
+// passing test persists the tested critical config and selected mode; a failing
+// test persists the masked error.
 func TestLLMReviewSchema(c *gin.Context) {
 	var req reviewCandidateRequest
 	_ = common.DecodeJson(c.Request.Body, &req)
@@ -311,23 +378,27 @@ func TestLLMReviewSchema(c *gin.Context) {
 		return
 	}
 	client := service.NewReviewClient(tmp)
-	passed, schemaErr, err := client.TestSchemaCapability(context.Background())
+	capability, err := client.TestStructuredOutputCapability(context.Background())
 	if err != nil {
 		message := sanitizeReviewError(err)
 		if saveErr := service.SaveReviewSchemaTestFailure(message); saveErr != nil {
 			common.ApiError(c, saveErr)
 			return
 		}
-		common.ApiErrorMsg(c, "schema test failed: "+message)
+		common.ApiErrorMsg(c, "structured output test failed: "+message)
 		return
 	}
-	if !passed {
-		message := sanitizeReviewError(errors.New(schemaErr))
+	if !capability.Passed {
+		message := capability.Error
+		if strings.TrimSpace(message) == "" {
+			message = "no supported structured-output mode"
+		}
+		message = sanitizeReviewError(errors.New(message))
 		if saveErr := service.SaveReviewSchemaTestFailure(message); saveErr != nil {
 			common.ApiError(c, saveErr)
 			return
 		}
-		common.ApiErrorMsg(c, "schema test not passed: "+message)
+		common.ApiErrorMsg(c, "structured output test not passed: "+message)
 		return
 	}
 
@@ -346,6 +417,9 @@ func TestLLMReviewSchema(c *gin.Context) {
 	if tmp.AllowPrivateAddress != cfg.AllowPrivateAddress {
 		updates["llm_review_setting.allow_private_url"] = common.Interface2String(tmp.AllowPrivateAddress)
 	}
+	if tmp.StructuredOutputMode != "" && tmp.StructuredOutputMode != cfg.StructuredOutputMode {
+		updates["llm_review_setting.structured_output_mode"] = tmp.StructuredOutputMode
+	}
 	if len(updates) > 0 {
 		if err := service.SaveReviewSetting(updates); err != nil {
 			common.ApiError(c, err)
@@ -353,33 +427,68 @@ func TestLLMReviewSchema(c *gin.Context) {
 		}
 	}
 
-	operation_setting.MarkSchemaTested(tmp.ModelName, service.ReviewSchemaVersion)
+	operation_setting.MarkStructuredOutputTested(capability.Mode, tmp.ModelName, service.ReviewSchemaVersion)
 	current := operation_setting.GetLLMReviewSetting()
-	_ = service.SaveReviewSetting(map[string]string{
-		"llm_review_setting.schema_tested":       "true",
-		"llm_review_setting.schema_tested_at":    strconv.FormatInt(current.SchemaTestedAt, 10),
-		"llm_review_setting.schema_tested_model": tmp.ModelName,
-		"llm_review_setting.schema_version":      current.SchemaVersion,
-		"llm_review_setting.test_error":          "",
-	})
+	updates = map[string]string{
+		"llm_review_setting.structured_output_mode":         capability.Mode,
+		"llm_review_setting.structured_output_tested":       "true",
+		"llm_review_setting.structured_output_tested_at":    strconv.FormatInt(current.StructuredOutputTestedAt, 10),
+		"llm_review_setting.structured_output_tested_model": tmp.ModelName,
+		"llm_review_setting.structured_output_version":      current.StructuredOutputVersion,
+		"llm_review_setting.test_error":                     "",
+	}
+	if capability.Mode == operation_setting.StructuredOutputModeStrictSchema {
+		updates["llm_review_setting.schema_tested"] = "true"
+		updates["llm_review_setting.schema_tested_at"] = strconv.FormatInt(current.SchemaTestedAt, 10)
+		updates["llm_review_setting.schema_tested_model"] = tmp.ModelName
+		updates["llm_review_setting.schema_version"] = current.SchemaVersion
+	} else {
+		updates["llm_review_setting.schema_tested"] = "false"
+		updates["llm_review_setting.schema_tested_at"] = "0"
+		updates["llm_review_setting.schema_tested_model"] = ""
+		updates["llm_review_setting.schema_version"] = ""
+	}
+	if err := service.SaveReviewSetting(updates); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	common.ApiSuccess(c, gin.H{
-		"ok":            true,
-		"schema_tested": true,
-		"model":         tmp.ModelName,
+		"ok":                       true,
+		"schema_tested":            capability.Mode == operation_setting.StructuredOutputModeStrictSchema,
+		"structured_output_tested": true,
+		"structured_output_mode":   capability.Mode,
+		"model":                    tmp.ModelName,
 	})
 }
 
 // GetLLMReviewSchemaStatus returns the capability test status (root).
 func GetLLMReviewSchemaStatus(c *gin.Context) {
 	cfg := operation_setting.GetLLMReviewSetting()
+	readiness := operation_setting.GetReviewReadiness(cfg)
+	structuredTestedAt := cfg.StructuredOutputTestedAt
+	structuredTestedModel := cfg.StructuredOutputTestedModel
+	structuredVersion := cfg.StructuredOutputVersion
+	if !cfg.StructuredOutputTested && cfg.SchemaTested {
+		structuredTestedAt = cfg.SchemaTestedAt
+		structuredTestedModel = cfg.SchemaTestedModel
+		structuredVersion = cfg.SchemaVersion
+	}
 	common.ApiSuccess(c, gin.H{
-		"status":                      operation_setting.SchemaTestStatus(cfg),
-		"tested":                      cfg.SchemaTested,
-		"supports_strict_json_schema": cfg.SchemaTested,
-		"tested_at":                   cfg.SchemaTestedAt,
-		"tested_model":                cfg.SchemaTestedModel,
-		"schema_version":              cfg.SchemaVersion,
-		"error":                       cfg.TestError,
+		"status":                         operation_setting.SchemaTestStatus(cfg),
+		"tested":                         cfg.SchemaTested,
+		"supports_strict_json_schema":    cfg.SchemaTested,
+		"tested_at":                      cfg.SchemaTestedAt,
+		"tested_model":                   cfg.SchemaTestedModel,
+		"schema_version":                 cfg.SchemaVersion,
+		"structured_output_mode":         readiness.Mode,
+		"structured_output_tested":       readiness.CapabilityTested,
+		"structured_output_tested_at":    structuredTestedAt,
+		"structured_output_tested_model": structuredTestedModel,
+		"structured_output_version":      structuredVersion,
+		"policy_configured":              readiness.PolicyConfigured,
+		"ready":                          readiness.Ready,
+		"readiness_reason":               readiness.Reason,
+		"error":                          cfg.TestError,
 	})
 }
 
@@ -387,12 +496,16 @@ func GetLLMReviewSchemaStatus(c *gin.Context) {
 // capability state.
 func ClearLLMReviewAPIKey(c *gin.Context) {
 	updates := map[string]string{
-		"llm_review_setting.api_key":             "",
-		"llm_review_setting.schema_tested":       "false",
-		"llm_review_setting.schema_tested_at":    "0",
-		"llm_review_setting.schema_tested_model": "",
-		"llm_review_setting.schema_version":      "",
-		"llm_review_setting.test_error":          "",
+		"llm_review_setting.api_key":                        "",
+		"llm_review_setting.schema_tested":                  "false",
+		"llm_review_setting.schema_tested_at":               "0",
+		"llm_review_setting.schema_tested_model":            "",
+		"llm_review_setting.schema_version":                 "",
+		"llm_review_setting.structured_output_tested":       "false",
+		"llm_review_setting.structured_output_tested_at":    "0",
+		"llm_review_setting.structured_output_tested_model": "",
+		"llm_review_setting.structured_output_version":      "",
+		"llm_review_setting.test_error":                     "",
 	}
 	if err := service.SaveReviewSetting(updates); err != nil {
 		common.ApiError(c, err)
@@ -490,6 +603,7 @@ func llmReviewTaskDetail(task *model.LLMReviewTask, attempts []*model.LLMReviewA
 	h["schema_valid"] = task.SchemaPassed
 	h["schema_error"] = task.SchemaError
 	h["review_model"] = task.ReviewerModel
+	h["output_mode"] = task.OutputMode
 	h["policy_id"] = task.PolicyID
 	h["prompt_template_version"] = task.PromptVersion
 	h["schema_version"] = task.SchemaVersion

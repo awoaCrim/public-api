@@ -42,6 +42,14 @@ type UsageAnalysisTokenOption struct {
 	Name   string `json:"name"`
 }
 
+type UsageAnalysisOptionsResponse struct {
+	Users      []UsageAnalysisNamedOption `json:"users"`
+	Tokens     []UsageAnalysisTokenOption `json:"tokens"`
+	Models     []string                   `json:"models"`
+	Channels   []UsageAnalysisNamedOption `json:"channels"`
+	RootUserID int                        `json:"root_user_id"`
+}
+
 func parseUsageAnalysisQuery(c *gin.Context) (model.UsageAnalysisQuery, error) {
 	now := time.Now()
 	startTimestamp, err := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
@@ -103,6 +111,31 @@ func GetUsageAnalysisOptions(c *gin.Context) {
 		return
 	}
 
+	// Resolve the canonical enabled Root by role, not by username. Find keeps
+	// the no-root case as a successful response with root_user_id=0.
+	var rootUser UsageAnalysisNamedOption
+	if err := model.DB.WithContext(queryContext).Model(&model.User{}).
+		Select("id, username AS name").
+		Where("role = ? AND status = ?", common.RoleRootUser, common.UserStatusEnabled).
+		Order("id ASC").
+		Limit(1).
+		Find(&rootUser).Error; err != nil {
+		writeUsageAnalysisQueryError(c, queryContext, err)
+		return
+	}
+	if rootUser.ID > 0 {
+		rootVisible := false
+		for _, user := range users {
+			if user.ID == rootUser.ID {
+				rootVisible = true
+				break
+			}
+		}
+		if !rootVisible {
+			users = append(users, rootUser)
+		}
+	}
+
 	tokens := make([]UsageAnalysisTokenOption, 0)
 	if err := model.DB.WithContext(queryContext).Model(&model.Token{}).
 		Select("id, user_id, name").
@@ -135,11 +168,12 @@ func GetUsageAnalysisOptions(c *gin.Context) {
 		return
 	}
 
-	common.ApiSuccess(c, gin.H{
-		"users":    users,
-		"tokens":   tokens,
-		"models":   models,
-		"channels": channels,
+	common.ApiSuccess(c, UsageAnalysisOptionsResponse{
+		Users:      users,
+		Tokens:     tokens,
+		Models:     models,
+		Channels:   channels,
+		RootUserID: rootUser.ID,
 	})
 }
 

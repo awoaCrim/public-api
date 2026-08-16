@@ -326,6 +326,7 @@ func CompleteLLMReviewTask(task *LLMReviewTask, attempt *LLMReviewAttempt) error
 			"schema_passed":  task.SchemaPassed,
 			"schema_error":   task.SchemaError,
 			"reviewer_model": task.ReviewerModel,
+			"output_mode":    task.OutputMode,
 			"policy_id":      task.PolicyID,
 			"prompt_version": task.PromptVersion,
 			"schema_version": task.SchemaVersion,

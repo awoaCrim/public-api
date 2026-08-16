@@ -64,6 +64,7 @@ export interface UsageAnalysisOptions {
   tokens: { id: number; user_id: number; name: string }[]
   models: string[]
   channels: { id: number; name: string }[]
+  root_user_id: number
 }
 
 interface ApiResponse<T> {

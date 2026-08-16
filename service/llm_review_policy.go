@@ -1,20 +1,11 @@
 package service
 
 import (
-	"regexp"
-	"strings"
-
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
-	"golang.org/x/net/html"
 )
 
-const reviewMaxPolicyTextRunes = 12000
-
-var (
-	markdownImagePattern = regexp.MustCompile(`!\[([^\]]*)\]\([^\)]*\)`)
-	markdownLinkPattern  = regexp.MustCompile(`\[([^\]]+)\]\([^\)]*\)`)
-)
+const reviewMaxPolicyTextRunes = operation_setting.MaxPolicyTextRunes
 
 // currentReviewPolicyText returns the configured review policy text in plain
 // form. The policy lives in llm_review_setting.policy_text so admins control
@@ -27,79 +18,10 @@ func currentReviewPolicyText() string {
 	return sanitizeReviewPolicyText(cfg.PolicyText)
 }
 
-// sanitizeReviewPolicyText strips HTML/Markdown presentation wrappers and
-// caps the length so rich-text markup, image links or oversized content never
-// reach the reviewer context.
+// sanitizeReviewPolicyText keeps the service's local vocabulary while
+// sharing the exact readiness/payload normalization with the setting layer.
 func sanitizeReviewPolicyText(raw string) string {
-	text := strings.TrimSpace(strings.ReplaceAll(raw, "\r\n", "\n"))
-	text = strings.ReplaceAll(text, "\r", "\n")
-	if text == "" {
-		return ""
-	}
-
-	if strings.Contains(text, "<") && strings.Contains(text, ">") {
-		if plain, ok := extractHTMLText(text); ok {
-			text = plain
-		}
-	}
-	text = markdownImagePattern.ReplaceAllString(text, "$1")
-	text = markdownLinkPattern.ReplaceAllString(text, "$1")
-
-	lines := strings.Split(text, "\n")
-	cleaned := make([]string, 0, len(lines))
-	lastBlank := true
-	for _, line := range lines {
-		line = strings.Join(strings.Fields(line), " ")
-		if line == "" {
-			if !lastBlank {
-				cleaned = append(cleaned, "")
-				lastBlank = true
-			}
-			continue
-		}
-		cleaned = append(cleaned, line)
-		lastBlank = false
-	}
-	text = strings.TrimSpace(strings.Join(cleaned, "\n"))
-
-	runes := []rune(text)
-	if len(runes) > reviewMaxPolicyTextRunes {
-		text = strings.TrimSpace(string(runes[:reviewMaxPolicyTextRunes])) + "\n[policy text truncated]"
-	}
-	return text
-}
-
-func extractHTMLText(raw string) (string, bool) {
-	doc, err := html.Parse(strings.NewReader("<div>" + raw + "</div>"))
-	if err != nil {
-		return "", false
-	}
-	var builder strings.Builder
-	var walk func(*html.Node, bool)
-	walk = func(node *html.Node, skipped bool) {
-		if node.Type == html.ElementNode {
-			switch strings.ToLower(node.Data) {
-			case "script", "style", "noscript", "svg":
-				skipped = true
-			case "br", "p", "div", "section", "article", "header", "footer", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote", "tr":
-				builder.WriteByte('\n')
-			}
-		}
-		if node.Type == html.TextNode && !skipped {
-			builder.WriteString(node.Data)
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			walk(child, skipped)
-		}
-		if node.Type == html.ElementNode && !skipped {
-			switch strings.ToLower(node.Data) {
-			case "p", "div", "section", "article", "header", "footer", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote", "tr":
-				builder.WriteByte('\n')
-			}
-		}
-	}
-	walk(doc, false)
-	return builder.String(), true
+	return operation_setting.NormalizePolicyText(raw)
 }
 
 // payloadWithReviewPolicy ensures the payload contains the current policy

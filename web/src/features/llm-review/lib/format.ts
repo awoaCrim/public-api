@@ -22,6 +22,7 @@ import type {
   ReviewCategory,
   ReviewTaskStatus,
   ReviewTriggerType,
+  StructuredOutputMode,
 } from '../types'
 
 /** Task status -> i18n label key. */
@@ -77,6 +78,24 @@ export function getReviewCategoryLabel(
 ): string {
   if (!category) return '-'
   return t(REVIEW_CATEGORY_LABEL_KEYS[category] ?? category)
+}
+
+/** Structured-output mode -> i18n label key. */
+export const REVIEW_OUTPUT_MODE_LABEL_KEYS: Record<
+  StructuredOutputMode,
+  string
+> = {
+  strict_schema: 'Strict JSON schema',
+  json_object: 'JSON object compatibility',
+  prompt_json: 'Prompt-only JSON compatibility',
+}
+
+export function getReviewOutputModeLabel(
+  mode: StructuredOutputMode | '' | undefined,
+  t: TFunction
+): string {
+  if (!mode) return '-'
+  return t(REVIEW_OUTPUT_MODE_LABEL_KEYS[mode] ?? mode)
 }
 
 /** Recent (24h) failure rate display percentage. */

@@ -40,6 +40,7 @@ import { getLLMReviewTaskDetail, retryLLMReviewTask } from '../api'
 import {
   formatReviewTime,
   getReviewCategoryLabel,
+  getReviewOutputModeLabel,
   getReviewStatusLabel,
   getReviewTriggerLabel,
 } from '../lib/format'
@@ -240,6 +241,12 @@ export function ReviewDetailDrawer(props: ReviewDetailDrawerProps) {
                   value={detail.api_endpoint || '-'}
                   mono
                 />
+                {detail.output_mode && (
+                  <DetailRow
+                    label={t('Output Mode')}
+                    value={getReviewOutputModeLabel(detail.output_mode, t)}
+                  />
+                )}
                 <DetailRow label='IP' value={detail.ip_masked || '-'} mono />
               </div>
 

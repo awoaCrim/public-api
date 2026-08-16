@@ -35,6 +35,21 @@ export type UsageAnalysisTrendDatum = {
   cacheWriteTokens: number
 }
 
+export type UsageAnalysisInitialSelection = {
+  userId: string
+  rootUnavailable: boolean
+}
+
+export function getInitialUsageAnalysisSelection(
+  rootUserId: number | null | undefined,
+  allValue = 'all'
+): UsageAnalysisInitialSelection {
+  if (typeof rootUserId === 'number' && rootUserId > 0) {
+    return { userId: String(rootUserId), rootUnavailable: false }
+  }
+  return { userId: allValue, rootUnavailable: true }
+}
+
 export function areUsageAnalysisSelectionsEqual(
   first: UsageAnalysisSelection,
   second: UsageAnalysisSelection

@@ -24,6 +24,7 @@ import {
   formatReviewTime,
   formatWaitingSeconds,
   REVIEW_CATEGORY_LABEL_KEYS,
+  REVIEW_OUTPUT_MODE_LABEL_KEYS,
   REVIEW_STATUS_LABEL_KEYS,
   REVIEW_TRIGGER_LABEL_KEYS,
 } from '../format'
@@ -52,5 +53,6 @@ describe('review format helpers', () => {
     assert.equal(Object.keys(REVIEW_STATUS_LABEL_KEYS).length, 8)
     assert.equal(Object.keys(REVIEW_TRIGGER_LABEL_KEYS).length, 3)
     assert.equal(Object.keys(REVIEW_CATEGORY_LABEL_KEYS).length, 10)
+    assert.equal(Object.keys(REVIEW_OUTPUT_MODE_LABEL_KEYS).length, 3)
   })
 })

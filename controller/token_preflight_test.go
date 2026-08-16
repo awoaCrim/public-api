@@ -124,7 +124,12 @@ func TestCheckInputTokenPreflightBlocksAcceptedEstimator(t *testing.T) {
 	// as a pending task instead of an audit-only skipped record.
 	reviewCfg := reviewSettingControllerForTest(t)
 	reviewCfg.Enabled = true
+	reviewCfg.BaseURL = "https://review.example.com"
+	reviewCfg.ModelName = "reviewer"
 	reviewCfg.PolicyText = "No sharing."
+	reviewCfg.StructuredOutputMode = operation_setting.StructuredOutputModeStrictSchema
+	reviewCfg.StructuredOutputTested = false
+	reviewCfg.SchemaTested = true
 
 	// Bulk-seed 1000 acceptance samples for the model.
 	samples := make([]*model.LLMReviewCalibration, 0, 1000)

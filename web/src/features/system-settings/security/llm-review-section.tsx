@@ -18,7 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ListChecks, Loader2, PlugZap, ShieldCheck, Trash2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  ListChecks,
+  Loader2,
+  PlugZap,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -54,6 +61,7 @@ import {
 import {
   formatFailureRate,
   formatWaitingSeconds,
+  getReviewOutputModeLabel,
 } from '@/features/llm-review/lib/format'
 
 import {
@@ -119,6 +127,7 @@ export function LLMReviewSection() {
   const model = form.watch('model')
   const timeoutSeconds = form.watch('timeoutSeconds')
   const allowPrivateUrl = form.watch('allowPrivateUrl')
+  const policyText = form.watch('policyText')
   const candidateReady = baseUrl.trim() !== '' && model.trim() !== ''
 
   const configQuery = useQuery({
@@ -225,17 +234,26 @@ export function LLMReviewSection() {
       }),
     onSuccess: (data) => {
       if (data.success) {
-        toast.success(t('Strict schema test passed'))
+        const mode = data.data?.structured_output_mode
+        toast.success(
+          mode
+            ? `${t('Structured output capability test passed')}: ${getReviewOutputModeLabel(mode, t)}`
+            : t('Structured output capability test passed')
+        )
         queryClient.invalidateQueries({
           queryKey: ['llm-review-schema-status'],
         })
         queryClient.invalidateQueries({ queryKey: ['llm-review-config'] })
       } else {
-        toast.error(data.message || t('Strict schema test failed'))
+        toast.error(
+          data.message || t('Structured output capability test failed')
+        )
       }
     },
     onError: (error: Error) => {
-      toast.error(error.message || t('Strict schema test failed'))
+      toast.error(
+        error.message || t('Structured output capability test failed')
+      )
     },
   })
 
@@ -286,22 +304,43 @@ export function LLMReviewSection() {
       )
     }
     if (schemaStatus.status === 'passed') {
+      const compatibilityMode =
+        schemaStatus.structured_output_mode !== 'strict_schema'
       return (
-        <div className='flex flex-wrap items-center gap-2'>
-          <Badge variant='default'>
-            <ShieldCheck data-icon='inline-start' />
-            {t('Supported')}
-          </Badge>
-          <span className='text-muted-foreground text-xs'>
-            {t('Tested model')}: {schemaStatus.tested_model || '-'}
-          </span>
+        <div className='flex flex-col gap-1'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Badge variant={compatibilityMode ? 'secondary' : 'default'}>
+              <ShieldCheck data-icon='inline-start' />
+              {compatibilityMode ? t('Compatibility mode') : t('Supported')}
+            </Badge>
+            <span className='text-muted-foreground text-xs'>
+              {t('Output mode')}:{' '}
+              {getReviewOutputModeLabel(schemaStatus.structured_output_mode, t)}
+            </span>
+            <span className='text-muted-foreground text-xs'>
+              {t('Tested model')}:{' '}
+              {schemaStatus.tested_model ||
+                schemaStatus.structured_output_tested_model ||
+                '-'}
+            </span>
+          </div>
+          {compatibilityMode && (
+            <span className='text-muted-foreground text-xs'>
+              {t('Auto-ban is disabled in compatibility mode.')}
+            </span>
+          )}
+          {!schemaStatus.ready && schemaStatus.readiness_reason && (
+            <span className='text-destructive text-xs'>
+              {schemaStatus.readiness_reason}
+            </span>
+          )}
         </div>
       )
     }
     if (schemaStatus.status === 'failed') {
       return (
         <div className='flex flex-col gap-1'>
-          <Badge variant='destructive'>{t('Not Supported')}</Badge>
+          <Badge variant='destructive'>{t('Capability test failed')}</Badge>
           {schemaStatus.error && (
             <span className='text-muted-foreground text-xs'>
               {schemaStatus.error}
@@ -310,7 +349,16 @@ export function LLMReviewSection() {
         </div>
       )
     }
-    return <Badge variant='secondary'>{t('Untested')}</Badge>
+    return (
+      <div className='flex flex-col gap-1'>
+        <Badge variant='secondary'>{t('Untested')}</Badge>
+        {schemaStatus.readiness_reason && (
+          <span className='text-muted-foreground text-xs'>
+            {schemaStatus.readiness_reason}
+          </span>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -328,7 +376,7 @@ export function LLMReviewSection() {
               <FormLabel>{t('Enable compliance review')}</FormLabel>
               <FormDescription>
                 {t(
-                  'Disabled by default. Requires a configured reviewer endpoint and a passing strict JSON schema capability test before it can be enabled.'
+                  'Disabled by default. Requires a configured reviewer endpoint, policy text, and a passing structured-output capability test before it can be enabled.'
                 )}
               </FormDescription>
             </SettingsSwitchContent>
@@ -466,6 +514,14 @@ export function LLMReviewSection() {
                       'Submitted with every review payload; HTML/Markdown wrappers are stripped and length is capped.'
                     )}
                   </FormDescription>
+                  {!policyText.trim() && config && (
+                    <div className='text-destructive flex items-center gap-1 text-xs'>
+                      <AlertTriangle aria-hidden='true' />
+                      {t(
+                        'Policy text is required before compliance review can run.'
+                      )}
+                    </div>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
@@ -508,7 +564,7 @@ export function LLMReviewSection() {
                 ) : (
                   <ListChecks data-icon='inline-start' />
                 )}
-                {t('Test Strict Schema')}
+                {t('Test Structured Output')}
               </Button>
             </div>
             {renderSchemaStatus()}
@@ -680,7 +736,7 @@ export function LLMReviewSection() {
         onOpenChange={setClearApiKeyOpen}
         title={t('Clear API Key')}
         desc={t(
-          'This clears the stored reviewer API key and resets the strict schema capability state. The review service cannot run until the schema test passes again.'
+          'This clears the stored reviewer API key and resets the structured-output capability state. The review service cannot run until a capability test passes again.'
         )}
         confirmText={t('Clear')}
         handleConfirm={() => clearApiKeyMutation.mutate()}

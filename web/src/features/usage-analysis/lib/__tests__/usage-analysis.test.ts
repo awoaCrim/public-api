@@ -23,6 +23,7 @@ import type { UsageAnalysisTrendPoint } from '../../api'
 import {
   areUsageAnalysisSelectionsEqual,
   buildUsageAnalysisTrendData,
+  getInitialUsageAnalysisSelection,
   getTodayUsageAnalysisRange,
   hasSameUsageAnalysisDataScope,
   resetTokenSelectionForUser,
@@ -44,6 +45,24 @@ const emptyMetrics = {
 }
 
 describe('usage analysis helpers', () => {
+  test('selects the resolved Root user for the initial query', () => {
+    assert.deepEqual(getInitialUsageAnalysisSelection(42), {
+      userId: '42',
+      rootUnavailable: false,
+    })
+  })
+
+  test('falls back to all users when Root is unavailable', () => {
+    assert.deepEqual(getInitialUsageAnalysisSelection(0), {
+      userId: 'all',
+      rootUnavailable: true,
+    })
+    assert.deepEqual(getInitialUsageAnalysisSelection(undefined, 'any'), {
+      userId: 'any',
+      rootUnavailable: true,
+    })
+  })
+
   test('fills missing hourly buckets without changing returned metrics', () => {
     const points: UsageAnalysisTrendPoint[] = [
       {

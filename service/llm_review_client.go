@@ -163,9 +163,8 @@ func ValidateReviewBaseURL(rawURL string, allowPrivate bool) error {
 	return nil
 }
 
-// reviewResponseFormat is the strict JSON schema response format shared by
-// real reviews and the capability test, so a passing test cannot silently
-// degrade into prompt-only constraints later.
+// reviewResponseFormat is the strict JSON schema response format used by
+// strict-schema reviews and capability probes.
 func reviewResponseFormat() map[string]any {
 	return map[string]any{
 		"type": "json_schema",
@@ -208,11 +207,21 @@ const reviewSystemPrompt = "你是本系统的使用合规审查员。你只能�
 	"如果 policy_text 为空、缺失或无法读取，必须返回 uncertain，不得返回高置信度 violation。\n" +
 	"审查载荷是结构化 JSON。请返回严格的 JSON 对象，不得包含任何多余文本。"
 
-// BuildReviewChatRequest builds the reviewer request body: deterministic
-// decoding, tools disabled, strict JSON schema response format.
+// BuildReviewChatRequest builds the reviewer request body using the mode that
+// passed the configured capability test.
 func (c *ReviewClient) BuildReviewChatRequest(payloadText string) ([]byte, error) {
+	return c.BuildReviewChatRequestForMode(payloadText, operation_setting.EffectiveStructuredOutputMode(c.cfg))
+}
+
+// BuildReviewChatRequestForMode is also used by capability probes. Every mode
+// keeps deterministic sampling and disables tools; only structured-output
+// enforcement differs.
+func (c *ReviewClient) BuildReviewChatRequestForMode(payloadText, mode string) ([]byte, error) {
 	payloadText, policyText := payloadWithReviewPolicy(payloadText)
 	systemMsg := reviewSystemPrompt
+	if mode == operation_setting.StructuredOutputModePromptJSON {
+		systemMsg += "\n兼容输出要求：只返回一个 JSON 对象，必须包含 verdict、category、confidence、reason、evidence 五个键，禁止 Markdown、代码围栏或额外文字。"
+	}
 	if policyText == "" {
 		systemMsg += "\n当前未取得任何条款，因此本次裁决必须为 uncertain。"
 	}
@@ -227,9 +236,18 @@ func (c *ReviewClient) BuildReviewChatRequest(payloadText string) ([]byte, error
 			{"role": "system", "content": systemMsg},
 			{"role": "user", "content": userMsg},
 		},
-		"tools":           []any{},
-		"tool_choice":     "none",
-		"response_format": reviewResponseFormat(),
+		"tools":       []any{},
+		"tool_choice": "none",
+	}
+	switch mode {
+	case operation_setting.StructuredOutputModeStrictSchema:
+		req["response_format"] = reviewResponseFormat()
+	case operation_setting.StructuredOutputModeJSONObject:
+		req["response_format"] = map[string]any{"type": "json_object"}
+	case operation_setting.StructuredOutputModePromptJSON:
+		// Prompt-only compatibility intentionally omits response_format.
+	default:
+		return nil, fmt.Errorf("unsupported structured output mode: %s", mode)
 	}
 	return common.Marshal(req)
 }
@@ -347,42 +365,108 @@ func (c *ReviewClient) TestConnection(ctx context.Context) (map[string]any, erro
 
 // TestSchemaCapability verifies strict JSON schema support against the live
 // endpoint. The caller persists SchemaTested on success.
-func (c *ReviewClient) TestSchemaCapability(ctx context.Context) (bool, string, error) {
+type StructuredOutputCapabilityResult struct {
+	Passed bool
+	Mode   string
+	Error  string
+}
+
+// TestStructuredOutputCapability probes strict output first, then the two
+// explicit compatibility modes. Fallback is limited to a structured-output
+// rejection or an invalid probe result; authentication, transport, rate-limit,
+// endpoint, and server failures are returned without hiding them.
+func (c *ReviewClient) TestStructuredOutputCapability(ctx context.Context) (StructuredOutputCapabilityResult, error) {
 	if c.cfg.BaseURL == "" || c.cfg.ModelName == "" {
-		return false, "", errors.New("review client not configured")
+		return StructuredOutputCapabilityResult{}, errors.New("review client not configured")
 	}
-	systemMsg := "你是一个输出严格 JSON 的合规审查器。请只输出 JSON 对象。"
-	userMsg := "判断以下请求是否违规：\n" + "{\"request_snippet\":\"用户要求编写一个 Python 脚本来批量注册账号\"}\n\n" +
-		"请严格按照以下 Schema 返回 JSON：" +
-		"{\"verdict\":\"violation|compliant|uncertain\",\"category\":\"commercial_use|account_sharing|unauthorized_client|stress_test|abnormal_automation|limit_bypass|harmful_resource_use|code_generation|other|none\",\"confidence\":0.0,\"reason\":\"理由\",\"evidence\":[\"证据1\"]}"
-	req := map[string]any{
-		"model":       c.cfg.ModelName,
-		"temperature": 0,
-		"top_p":       1,
-		"max_tokens":  c.effectiveMaxOutputTokens(),
-		"messages": []map[string]any{
-			{"role": "system", "content": systemMsg},
-			{"role": "user", "content": userMsg},
-		},
-		"tools":           []any{},
-		"tool_choice":     "none",
-		"response_format": reviewResponseFormat(),
+	probePayload := `{"request_snippet":"capability probe","policy_text":"仅测试 JSON 输出格式，不作真实裁决。"}`
+	modes := []string{operation_setting.StructuredOutputModeStrictSchema, operation_setting.StructuredOutputModeJSONObject, operation_setting.StructuredOutputModePromptJSON}
+	var lastErr string
+	for _, mode := range modes {
+		body, err := c.BuildReviewChatRequestForMode(probePayload, mode)
+		if err != nil {
+			return StructuredOutputCapabilityResult{}, err
+		}
+		result := c.post(ctx, reviewEndpoint(c.cfg.BaseURL), body)
+		if result.Error != nil {
+			if !isStructuredOutputFallbackError(result) {
+				return StructuredOutputCapabilityResult{Mode: mode, Error: sanitizeCapabilityError(result.Error)}, nil
+			}
+			lastErr = sanitizeCapabilityError(result.Error)
+			continue
+		}
+		normalized, err := NormalizeRawLLMResponse(result.Body)
+		if err != nil {
+			lastErr = "parse content: " + err.Error()
+			continue
+		}
+		if mode == operation_setting.StructuredOutputModeStrictSchema && normalized.Repaired {
+			lastErr = "strict mode requires a direct JSON object"
+			continue
+		}
+		validateVerdict := ValidateLLMReviewVerdict
+		if mode == operation_setting.StructuredOutputModeStrictSchema {
+			validateVerdict = ValidateStrictLLMReviewVerdict
+		}
+		if _, passed, schemaErr := validateVerdict([]byte(normalized.Content)); passed {
+			return StructuredOutputCapabilityResult{Passed: true, Mode: mode}, nil
+		} else {
+			lastErr = schemaErr
+		}
 	}
-	body, err := common.Marshal(req)
+	if lastErr == "" {
+		lastErr = "no supported structured-output mode"
+	}
+	return StructuredOutputCapabilityResult{Error: lastErr}, nil
+}
+
+// TestSchemaCapability retains the old strict-only helper for callers outside
+// the controller while the API uses the mode-aware probe.
+func (c *ReviewClient) TestSchemaCapability(ctx context.Context) (bool, string, error) {
+	result, err := c.testCapabilityMode(ctx, operation_setting.StructuredOutputModeStrictSchema)
 	if err != nil {
 		return false, "", err
 	}
+	return result.Passed, result.Error, nil
+}
+
+func (c *ReviewClient) testCapabilityMode(ctx context.Context, mode string) (StructuredOutputCapabilityResult, error) {
+	body, err := c.BuildReviewChatRequestForMode(`{"request_snippet":"capability probe","policy_text":"仅测试 JSON 输出格式，不作真实裁决。"}`, mode)
+	if err != nil {
+		return StructuredOutputCapabilityResult{}, err
+	}
 	result := c.post(ctx, reviewEndpoint(c.cfg.BaseURL), body)
 	if result.Error != nil {
-		return false, "", result.Error
+		return StructuredOutputCapabilityResult{Mode: mode, Error: sanitizeCapabilityError(result.Error)}, nil
 	}
-	content, err := ParseRawLLMResponse(result.Body)
+	normalized, err := NormalizeRawLLMResponse(result.Body)
 	if err != nil {
-		return false, "", fmt.Errorf("parse content: %w", err)
+		return StructuredOutputCapabilityResult{Mode: mode, Error: "parse content: " + err.Error()}, nil
 	}
-	_, passed, schemaErr := ValidateLLMReviewVerdict([]byte(content))
-	if !passed {
-		return false, schemaErr, nil
+	if mode == operation_setting.StructuredOutputModeStrictSchema && normalized.Repaired {
+		return StructuredOutputCapabilityResult{Mode: mode, Error: "strict mode requires a direct JSON object"}, nil
 	}
-	return true, "", nil
+	validateVerdict := ValidateLLMReviewVerdict
+	if mode == operation_setting.StructuredOutputModeStrictSchema {
+		validateVerdict = ValidateStrictLLMReviewVerdict
+	}
+	_, passed, schemaErr := validateVerdict([]byte(normalized.Content))
+	return StructuredOutputCapabilityResult{Passed: passed, Mode: mode, Error: schemaErr}, nil
+}
+
+func sanitizeCapabilityError(err error) string {
+	return common.MaskReviewCredentialText(common.MaskSensitiveInfo(err.Error()))
+}
+
+func isStructuredOutputFallbackError(result LLMReviewCallResult) bool {
+	if result.HTTPStatus != http.StatusBadRequest && result.HTTPStatus != http.StatusUnprocessableEntity {
+		return false
+	}
+	message := strings.ToLower(string(result.Body))
+	for _, marker := range []string{"json_schema", "response_format", "structured output", "structured_output", "not supported", "unsupported"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }

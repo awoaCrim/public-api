@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, RefreshCw } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -48,6 +48,7 @@ import { UsageAnalysisTrend } from './components/usage-analysis-trend'
 import {
   areUsageAnalysisSelectionsEqual,
   buildUsageAnalysisTrendData,
+  getInitialUsageAnalysisSelection,
   getTodayUsageAnalysisRange,
   hasSameUsageAnalysisDataScope,
   resetTokenSelectionForUser,
@@ -73,6 +74,8 @@ export function UsageAnalysis() {
   const { t } = useTranslation()
   const [filters, setFilters] = useState(getDefaultFilters)
   const [appliedFilters, setAppliedFilters] = useState(getDefaultFilters)
+  const [filtersInitialized, setFiltersInitialized] = useState(false)
+  const [rootUnavailable, setRootUnavailable] = useState(false)
   const [page, setPage] = useState(1)
 
   const optionsQuery = useQuery({
@@ -81,6 +84,39 @@ export function UsageAnalysis() {
     staleTime: 5 * 60 * 1000,
   })
   const options = optionsQuery.data?.data
+
+  useEffect(() => {
+    if (
+      filtersInitialized ||
+      !optionsQuery.isSuccess ||
+      !optionsQuery.data?.success ||
+      !options
+    ) {
+      return
+    }
+
+    const initialSelection = getInitialUsageAnalysisSelection(
+      options.root_user_id,
+      ALL
+    )
+    setFilters((current) => ({
+      ...current,
+      userId: initialSelection.userId,
+      tokenId: ALL,
+    }))
+    setAppliedFilters((current) => ({
+      ...current,
+      userId: initialSelection.userId,
+      tokenId: ALL,
+    }))
+    setRootUnavailable(initialSelection.rootUnavailable)
+    setFiltersInitialized(true)
+  }, [
+    filtersInitialized,
+    options,
+    optionsQuery.data?.success,
+    optionsQuery.isSuccess,
+  ])
 
   const queryParams = useMemo<UsageAnalysisParams>(
     () => ({
@@ -109,6 +145,7 @@ export function UsageAnalysis() {
   const analysisQuery = useQuery({
     queryKey: ['usage-analysis', queryParams],
     queryFn: () => getUsageAnalysis(queryParams),
+    enabled: filtersInitialized,
     placeholderData: (previousData, previousQuery) => {
       const previousParams = previousQuery?.queryKey[1] as
         | UsageAnalysisParams
@@ -362,6 +399,17 @@ export function UsageAnalysis() {
             <Alert variant='destructive'>
               <AlertCircle aria-hidden='true' />
               <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+          )}
+
+          {filtersInitialized && rootUnavailable && (
+            <Alert>
+              <AlertCircle aria-hidden='true' />
+              <AlertDescription>
+                {t(
+                  'Root user could not be resolved. Showing All Users; select a user manually or retry.'
+                )}
+              </AlertDescription>
             </Alert>
           )}
 

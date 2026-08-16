@@ -195,3 +195,107 @@ func TestBuildReviewChatRequestPinsDeterministicContract(t *testing.T) {
 	userMsg := messages[1].(map[string]any)["content"].(string)
 	assert.Contains(t, userMsg, "No account sharing.")
 }
+
+func TestBuildReviewChatRequestSupportsCompatibilityModes(t *testing.T) {
+	cfg := llmReviewSettingForTest(t)
+	cfg.ModelName = "reviewer-model"
+	cfg.PolicyText = "No account sharing."
+	client := NewReviewClient(cfg)
+
+	jsonObjectBody, err := client.BuildReviewChatRequestForMode(`{"request_snippet":"x"}`, operation_setting.StructuredOutputModeJSONObject)
+	require.NoError(t, err)
+	var jsonObjectReq map[string]any
+	require.NoError(t, common.Unmarshal(jsonObjectBody, &jsonObjectReq))
+	assert.Equal(t, map[string]any{"type": "json_object"}, jsonObjectReq["response_format"])
+
+	promptJSONBody, err := client.BuildReviewChatRequestForMode(`{"request_snippet":"x"}`, operation_setting.StructuredOutputModePromptJSON)
+	require.NoError(t, err)
+	var promptJSONReq map[string]any
+	require.NoError(t, common.Unmarshal(promptJSONBody, &promptJSONReq))
+	assert.NotContains(t, promptJSONReq, "response_format")
+	promptMessages := promptJSONReq["messages"].([]any)
+	assert.Contains(t, promptMessages[0].(map[string]any)["content"].(string), "兼容输出要求")
+}
+
+func TestTestStructuredOutputCapabilityFallsBackToJSONMode(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req map[string]any
+		require.NoError(t, common.DecodeJson(r.Body, &req))
+		format, _ := req["response_format"].(map[string]any)
+		if format["type"] == "json_schema" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"json_schema is not supported"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(reviewVerdictBody("uncertain", "none", 0.2)))
+	}))
+	defer server.Close()
+
+	cfg := &operation_setting.LLMReviewSetting{
+		BaseURL:             server.URL,
+		ModelName:           "reviewer",
+		TimeoutSeconds:      5,
+		AllowPrivateAddress: true,
+	}
+	result, err := NewReviewClient(cfg).TestStructuredOutputCapability(context.Background())
+	require.NoError(t, err)
+	assert.True(t, result.Passed)
+	assert.Equal(t, operation_setting.StructuredOutputModeJSONObject, result.Mode)
+	assert.Equal(t, 2, calls)
+}
+
+func TestTestStructuredOutputCapabilityDoesNotTrustRepairedStrictResponse(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req map[string]any
+		require.NoError(t, common.DecodeJson(r.Body, &req))
+		format, _ := req["response_format"].(map[string]any)
+		if format["type"] == "json_schema" {
+			inner := `{"verdict":"uncertain","category":"none","confidence":0.2,"reason":"r","evidence":["e"]}`
+			content, marshalErr := common.Marshal("```json\n" + inner + "\n```")
+			require.NoError(t, marshalErr)
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":` + string(content) + `}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(reviewVerdictBody("uncertain", "none", 0.2)))
+	}))
+	defer server.Close()
+
+	cfg := &operation_setting.LLMReviewSetting{
+		BaseURL:             server.URL,
+		ModelName:           "reviewer",
+		TimeoutSeconds:      5,
+		AllowPrivateAddress: true,
+	}
+	result, err := NewReviewClient(cfg).TestStructuredOutputCapability(context.Background())
+	require.NoError(t, err)
+	assert.True(t, result.Passed)
+	assert.Equal(t, operation_setting.StructuredOutputModeJSONObject, result.Mode)
+	assert.Equal(t, 2, calls)
+}
+
+func TestTestStructuredOutputCapabilityDoesNotFallbackOnAuthFailure(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"invalid api key"}}`))
+	}))
+	defer server.Close()
+
+	cfg := &operation_setting.LLMReviewSetting{
+		BaseURL:             server.URL,
+		ModelName:           "reviewer",
+		TimeoutSeconds:      5,
+		AllowPrivateAddress: true,
+	}
+	result, err := NewReviewClient(cfg).TestStructuredOutputCapability(context.Background())
+	require.NoError(t, err)
+	assert.False(t, result.Passed)
+	assert.Equal(t, operation_setting.StructuredOutputModeStrictSchema, result.Mode)
+	assert.Contains(t, result.Error, "http 400")
+	assert.Equal(t, 1, calls)
+}

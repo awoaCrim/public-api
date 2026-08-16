@@ -82,6 +82,7 @@ func TestProcessLLMReviewTaskCompliantVerdict(t *testing.T) {
 	assert.Equal(t, model.LLMReviewTaskCompliant, stored.Status)
 	assert.Equal(t, model.LLMReviewVerdictCompliant, stored.Verdict)
 	assert.True(t, stored.SchemaPassed)
+	assert.Equal(t, operation_setting.StructuredOutputModeStrictSchema, stored.OutputMode)
 
 	var attempts int64
 	require.NoError(t, model.DB.Model(&model.LLMReviewAttempt{}).Where("task_id = ?", task.ID).Count(&attempts).Error)
@@ -148,6 +149,72 @@ func TestProcessLLMReviewTaskAutoBanInvokesSeam(t *testing.T) {
 	require.NoError(t, model.DB.First(&stored, task.ID).Error)
 	assert.True(t, stored.Banned)
 	assert.Equal(t, model.LLMReviewTaskViolation, stored.Status)
+}
+
+func TestProcessLLMReviewTaskCompatibilityModeNeverAutoBans(t *testing.T) {
+	setupReviewTaskEnv(t)
+	_, cfg := newReviewWorkerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(reviewVerdictBody("violation", "account_sharing", 0.99)))
+	})
+	cfg.StructuredOutputMode = operation_setting.StructuredOutputModeJSONObject
+	cfg.StructuredOutputTested = true
+	cfg.SchemaTested = false
+
+	originalBan := reviewAutoBanUser
+	banCalls := 0
+	reviewAutoBanUser = func(task *model.LLMReviewTask, message string) error {
+		banCalls++
+		return nil
+	}
+	t.Cleanup(func() { reviewAutoBanUser = originalBan })
+
+	task := &model.LLMReviewTask{
+		UserId:  7,
+		Status:  model.LLMReviewTaskReviewing,
+		Payload: `{"request_snippet":"x","policy_text":"No sharing."}`,
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	processLLMReviewTask(task)
+
+	var stored model.LLMReviewTask
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Equal(t, model.LLMReviewTaskViolation, stored.Status)
+	assert.Equal(t, operation_setting.StructuredOutputModeJSONObject, stored.OutputMode)
+	assert.False(t, stored.Banned)
+	assert.Zero(t, banCalls)
+}
+
+func TestProcessLLMReviewTaskRepairedOutputNeverAutoBans(t *testing.T) {
+	setupReviewTaskEnv(t)
+	_, _ = newReviewWorkerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		inner := `{"verdict":"violation","category":"account_sharing","confidence":0.99,"reason":"r","evidence":["e"]}`
+		content, _ := common.Marshal("```json\n" + inner + "\n```")
+		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"content":%s}}]}`, content)
+	})
+
+	originalBan := reviewAutoBanUser
+	banCalls := 0
+	reviewAutoBanUser = func(task *model.LLMReviewTask, message string) error {
+		banCalls++
+		return nil
+	}
+	t.Cleanup(func() { reviewAutoBanUser = originalBan })
+
+	task := &model.LLMReviewTask{
+		UserId:  7,
+		Status:  model.LLMReviewTaskReviewing,
+		Payload: `{"request_snippet":"x","policy_text":"No sharing."}`,
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	processLLMReviewTask(task)
+
+	var stored model.LLMReviewTask
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Equal(t, model.LLMReviewTaskViolation, stored.Status)
+	assert.False(t, stored.Banned)
+	assert.Zero(t, banCalls)
 }
 
 func TestProcessLLMReviewTaskRetriesThenFails(t *testing.T) {
@@ -240,6 +307,8 @@ func TestProcessLLMReviewTaskWithoutPolicyCompletesUncertain(t *testing.T) {
 	assert.Equal(t, model.LLMReviewTaskUncertain, stored.Status)
 	assert.False(t, stored.SchemaPassed)
 	assert.Equal(t, "missing policy", stored.SchemaError)
+	require.Len(t, stored.Evidence, 1)
+	assert.Contains(t, stored.Evidence[0], "Policy Text")
 }
 
 func TestCheckManualOverrideSemantics(t *testing.T) {

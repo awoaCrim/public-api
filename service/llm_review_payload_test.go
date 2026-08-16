@@ -24,6 +24,7 @@ func TestValidateLLMReviewVerdict(t *testing.T) {
 		{"bad category", `{"verdict":"violation","category":"spam","confidence":0.9,"reason":"r","evidence":["e"]}`, false},
 		{"confidence too high", `{"verdict":"violation","category":"none","confidence":1.5,"reason":"r","evidence":["e"]}`, false},
 		{"confidence negative", `{"verdict":"violation","category":"none","confidence":-0.1,"reason":"r","evidence":["e"]}`, false},
+		{"missing reason", `{"verdict":"violation","category":"none","confidence":0.9,"evidence":["e"]}`, false},
 		{"missing evidence", `{"verdict":"violation","category":"none","confidence":0.9,"reason":"r","evidence":[]}`, false},
 	}
 	for _, tt := range tests {
@@ -35,6 +36,16 @@ func TestValidateLLMReviewVerdict(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateLLMReviewVerdictCompatibilityFields(t *testing.T) {
+	data := []byte(`{"verdict":"compliant","category":"none","confidence":0.9,"reason":"ok","evidence":["fine"],"provider_note":"extra"}`)
+
+	_, compatibilityPassed, compatibilityErr := ValidateLLMReviewVerdict(data)
+	assert.True(t, compatibilityPassed, compatibilityErr)
+	_, strictPassed, strictErr := ValidateStrictLLMReviewVerdict(data)
+	assert.False(t, strictPassed)
+	assert.Contains(t, strictErr, "unknown field")
 }
 
 func TestShouldAutoBanGating(t *testing.T) {
@@ -65,6 +76,16 @@ func TestShouldAutoBanGating(t *testing.T) {
 	untested := llmReviewSettingForTest(t)
 	untested.SchemaTested = false
 	assert.False(t, ShouldAutoBan(violation, true, untested), "capability-test failure must not ban")
+
+	compatibility := *cfg
+	compatibility.SchemaTested = false
+	compatibility.StructuredOutputMode = operation_setting.StructuredOutputModeJSONObject
+	compatibility.StructuredOutputTested = true
+	assert.False(t, ShouldAutoBanWithTrust(violation, true, &compatibility, operation_setting.StructuredOutputModeJSONObject, true), "compatibility results are manual-review only")
+	currentCompatibility := *cfg
+	currentCompatibility.StructuredOutputMode = operation_setting.StructuredOutputModeJSONObject
+	assert.False(t, ShouldAutoBanWithTrust(violation, true, &currentCompatibility, operation_setting.StructuredOutputModeStrictSchema, true), "a stale strict task mode must not bypass the current compatibility mode")
+	assert.False(t, ShouldAutoBanWithTrust(violation, true, cfg, operation_setting.StructuredOutputModeStrictSchema, false), "repaired output is never trusted for auto-ban")
 }
 
 func TestParseRawLLMResponse(t *testing.T) {
@@ -73,11 +94,25 @@ func TestParseRawLLMResponse(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, `{"verdict":"compliant"}`, content)
 
-	arrayContent := `{"choices":[{"message":{"content":[{"type":"text","text":"par"},{"type":"text","text":"tial"}]}}]}`
+	arrayContent := `{"choices":[{"message":{"content":[{"type":"text","text":"{\"verdict\":\"com"},{"type":"text","text":"pliant\"}"}]}}]}`
 	content, err = ParseRawLLMResponse([]byte(arrayContent))
 	require.NoError(t, err)
-	assert.Equal(t, "partial", content)
+	assert.Equal(t, `{"verdict":"compliant"}`, content)
 
+	fencedContent, marshalErr := common.Marshal("```json\n{\"verdict\":\"compliant\"}\n```")
+	require.NoError(t, marshalErr)
+	fenced := `{"choices":[{"message":{"content":` + string(fencedContent) + `}}]}`
+	content, err = ParseRawLLMResponse([]byte(fenced))
+	require.NoError(t, err)
+	assert.Equal(t, `{"verdict":"compliant"}`, content)
+
+	prose := `{"choices":[{"message":{"content":"Here is the result: {\"verdict\":\"compliant\"}"}}]}`
+	content, err = ParseRawLLMResponse([]byte(prose))
+	require.NoError(t, err)
+	assert.Equal(t, `{"verdict":"compliant"}`, content)
+
+	_, err = ParseRawLLMResponse([]byte(`{"choices":[{"message":{"content":"first {\"verdict\":\"compliant\"} then {\"verdict\":\"uncertain\"}"}}]}`))
+	require.Error(t, err)
 	_, err = ParseRawLLMResponse([]byte(`{"choices":[]}`))
 	require.Error(t, err)
 	_, err = ParseRawLLMResponse([]byte(`{`))

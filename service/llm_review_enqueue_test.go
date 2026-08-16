@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	operation_setting "github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,11 +48,11 @@ func useReviewEnqueueTestDB(t *testing.T) *gorm.DB {
 func createReviewEnqueueUser(t *testing.T, db *gorm.DB, username string, role int, status int) *model.User {
 	t.Helper()
 	user := &model.User{
-		Username:   username,
-		Password:   "placeholder",
-		Role:       role,
-		Status:     status,
-		Group:      "default",
+		Username:    username,
+		Password:    "placeholder",
+		Role:        role,
+		Status:      status,
+		Group:       "default",
 		AuthVersion: 1,
 	}
 	require.NoError(t, db.Create(user).Error)
@@ -63,7 +64,12 @@ func TestEnqueueLLMReviewPersistsPendingTaskForEnabledUser(t *testing.T) {
 	user := createReviewEnqueueUser(t, db, "review-user", common.RoleCommonUser, common.UserStatusEnabled)
 	cfg := llmReviewSettingForTest(t)
 	cfg.Enabled = true
+	cfg.BaseURL = "https://review.example.com"
+	cfg.ModelName = "reviewer"
 	cfg.PolicyText = "No sharing."
+	cfg.StructuredOutputMode = operation_setting.StructuredOutputModeStrictSchema
+	cfg.StructuredOutputTested = false
+	cfg.SchemaTested = true
 
 	err := EnqueueLLMReview(context.Background(), LLMReviewTrigger{
 		UserId:         user.Id,
@@ -100,10 +106,10 @@ func TestEnqueueLLMReviewPersistsSkippedDisabledForAudit(t *testing.T) {
 	cfg.Enabled = true
 
 	err := EnqueueLLMReview(context.Background(), LLMReviewTrigger{
-		UserId:      user.Id,
-		ModelName:   "gpt-4o",
-		TriggerType: LLMReviewTriggerRPM,
-		Stage:       LLMReviewStagePreflight,
+		UserId:       user.Id,
+		ModelName:    "gpt-4o",
+		TriggerType:  LLMReviewTriggerRPM,
+		Stage:        LLMReviewStagePreflight,
 		CurrentValue: 6,
 		LimitValue:   5,
 	})
@@ -167,11 +173,43 @@ func TestEnqueueLLMReviewGracePeriodRecordsSkipped(t *testing.T) {
 	_ = grace
 }
 
+func TestEnqueueLLMReviewSkipsWhenCapabilityIsUntested(t *testing.T) {
+	db := useReviewEnqueueTestDB(t)
+	user := createReviewEnqueueUser(t, db, "review-unready", common.RoleCommonUser, common.UserStatusEnabled)
+	cfg := llmReviewSettingForTest(t)
+	cfg.Enabled = true
+	cfg.BaseURL = "https://review.example.com"
+	cfg.ModelName = "reviewer"
+	cfg.PolicyText = "No sharing."
+	cfg.StructuredOutputMode = operation_setting.StructuredOutputModeStrictSchema
+	cfg.SchemaTested = false
+	cfg.StructuredOutputTested = false
+
+	require.NoError(t, EnqueueLLMReview(context.Background(), LLMReviewTrigger{
+		UserId:      user.Id,
+		ModelName:   "gpt-4o",
+		TriggerType: LLMReviewTriggerRPM,
+		Stage:       LLMReviewStagePreflight,
+	}))
+
+	var task model.LLMReviewTask
+	require.NoError(t, db.First(&task).Error)
+	assert.Equal(t, model.LLMReviewTaskSkipped, task.Status)
+	assert.Equal(t, model.SkipReasonReviewUnavailable, task.SkipReason)
+	assert.Contains(t, task.FailureReason, "capability")
+}
+
 func TestEnqueueLLMReviewMergesIntoActiveTask(t *testing.T) {
 	db := useReviewEnqueueTestDB(t)
 	user := createReviewEnqueueUser(t, db, "review-merge", common.RoleCommonUser, common.UserStatusEnabled)
 	cfg := llmReviewSettingForTest(t)
 	cfg.Enabled = true
+	cfg.BaseURL = "https://review.example.com"
+	cfg.ModelName = "reviewer"
+	cfg.PolicyText = "No sharing."
+	cfg.StructuredOutputMode = operation_setting.StructuredOutputModeStrictSchema
+	cfg.StructuredOutputTested = false
+	cfg.SchemaTested = true
 
 	first := LLMReviewTrigger{UserId: user.Id, ModelName: "gpt-4o", TriggerType: LLMReviewTriggerRPM, Stage: LLMReviewStagePreflight, CurrentValue: 6, LimitValue: 5}
 	require.NoError(t, EnqueueLLMReview(context.Background(), first))

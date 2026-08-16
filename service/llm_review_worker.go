@@ -24,11 +24,11 @@ const (
 )
 
 var (
-	llmReviewWorkerOnce sync.Once
-	llmReviewWorkerStop atomic.Bool
-	llmReviewWorkerWg   sync.WaitGroup
-	llmReviewSem        chan struct{}
-	llmReviewSemMu      sync.Mutex
+	llmReviewWorkerOnce  sync.Once
+	llmReviewWorkerStop  atomic.Bool
+	llmReviewWorkerWg    sync.WaitGroup
+	llmReviewSem         chan struct{}
+	llmReviewSemMu       sync.Mutex
 	llmReviewLastCleanup int64
 )
 
@@ -84,7 +84,8 @@ func StopLLMReviewWorker() {
 // runLLMReviewWorkerPass runs one claim round: retention cleanup, stale
 // recovery, then claim and dispatch due tasks within the concurrency limit.
 func runLLMReviewWorkerPass() {
-	if !operation_setting.IsLLMReviewEnabled() {
+	cfg := operation_setting.GetLLMReviewSetting()
+	if !cfg.Enabled || !operation_setting.GetReviewReadiness(cfg).Ready {
 		return
 	}
 	if now := common.GetTimestamp(); now-llmReviewLastCleanup >= llmReviewCleanupInterval {
@@ -101,7 +102,6 @@ func runLLMReviewWorkerPass() {
 	if err := model.RecoverStaleLLMReviewTasks(llmReviewStaleThreshold); err != nil {
 		logger.LogWarn(context.Background(), fmt.Sprintf("llm review stale recovery failed: %v", err))
 	}
-	cfg := operation_setting.GetLLMReviewSetting()
 	concurrency := operation_setting.ClampWorkerConcurrency(cfg.WorkerConcurrency)
 	ensureReviewSem(concurrency)
 
@@ -146,8 +146,8 @@ func runLLMReviewWorkerPass() {
 func processLLMReviewTask(task *model.LLMReviewTask) {
 	ctx := context.Background()
 	cfg := operation_setting.GetLLMReviewSetting()
-
-	// Manual actions after task creation supersede the review.
+	// Manual actions after task creation supersede the review, even when the
+	// service has since been disabled or its capability test has expired.
 	if reason := checkManualOverride(task); reason != "" {
 		_ = model.MarkLLMReviewTaskSuperseded(task.ID, reason)
 		return
@@ -158,7 +158,6 @@ func processLLMReviewTask(task *model.LLMReviewTask) {
 		return
 	}
 
-	client := NewReviewClient(cfg)
 	currentPayload, policyText := payloadWithCurrentReviewPolicy(task.Payload)
 	if currentPayload != task.Payload {
 		if err := model.UpdateLLMReviewTaskPayload(task.ID, currentPayload, ReviewPolicyID, ReviewPromptVersion); err != nil {
@@ -167,10 +166,21 @@ func processLLMReviewTask(task *model.LLMReviewTask) {
 		}
 		task.Payload = currentPayload
 	}
+	// Legacy tasks created before the policy prerequisite are completed
+	// explicitly as uncertain instead of being sent to an unavailable reviewer.
 	if policyText == "" {
 		completeLLMReviewWithoutPolicy(task, cfg)
 		return
 	}
+
+	readiness := operation_setting.GetReviewReadiness(cfg)
+	if !cfg.Enabled || !readiness.Ready {
+		_ = model.MarkLLMReviewTaskSkipped(task, model.SkipReasonReviewUnavailable)
+		return
+	}
+
+	client := NewReviewClient(cfg)
+	task.OutputMode = readiness.Mode
 	maxAttempts := cfg.MaxAttempts
 	if maxAttempts < 1 {
 		maxAttempts = ReviewDefaultMaxAttempts
@@ -204,7 +214,7 @@ func processLLMReviewTask(task *model.LLMReviewTask) {
 			return
 		}
 
-		content, err := ParseRawLLMResponse(result.Body)
+		normalized, err := NormalizeRawLLMResponse(result.Body)
 		if err != nil {
 			attempt.ParseError = common.MaskReviewCredentialText(common.MaskSensitiveInfo("parse content: " + err.Error()))
 			attempt.Retryable = true
@@ -213,11 +223,15 @@ func processLLMReviewTask(task *model.LLMReviewTask) {
 				_ = model.MarkLLMReviewTaskRetry(task.ID, attemptNo, retryInterval)
 				return
 			}
-			_ = model.FailLLMReviewTask(task.ID, "unable to parse llm response")
+			_ = model.FailLLMReviewTask(task.ID, "unable to normalize llm response: "+err.Error())
 			return
 		}
 
-		verdict, schemaPassed, schemaErr := ValidateLLMReviewVerdict([]byte(content))
+		validateVerdict := ValidateLLMReviewVerdict
+		if task.OutputMode == operation_setting.StructuredOutputModeStrictSchema {
+			validateVerdict = ValidateStrictLLMReviewVerdict
+		}
+		verdict, schemaPassed, schemaErr := validateVerdict([]byte(normalized.Content))
 		attempt.ParseError = schemaErr
 		attempt.Retryable = !schemaPassed
 		_ = model.RecordLLMReviewAttempt(attempt)
@@ -230,7 +244,7 @@ func processLLMReviewTask(task *model.LLMReviewTask) {
 			return
 		}
 
-		applyLLMReviewVerdict(task, verdict, attempt, cfg)
+		applyLLMReviewVerdict(task, verdict, attempt, cfg, !normalized.Repaired)
 		return
 	}
 }
@@ -243,7 +257,7 @@ func completeLLMReviewWithoutPolicy(task *model.LLMReviewTask, cfg *operation_se
 	task.Category = model.LLMReviewCategoryNone
 	task.Confidence = 0
 	task.Reason = "未配置使用条款，无法依据站点规则完成审查，已转人工复核。"
-	task.Evidence = model.LLMReviewEvidence{"未取得条款文本"}
+	task.Evidence = model.LLMReviewEvidence{"请管理员在系统设置中填写 Policy Text（使用条款）后重新提交审查。"}
 	task.ReviewerModel = cfg.ModelName
 	task.PolicyID = ReviewPolicyID
 	task.PromptVersion = ReviewPromptVersion
@@ -291,7 +305,7 @@ func checkManualOverride(task *model.LLMReviewTask) string {
 // applyLLMReviewVerdict applies a schema-valid verdict. Before an automatic
 // permanent disable the manual ban/unban timestamps are re-checked to close
 // the race with admin actions during the reviewer call.
-func applyLLMReviewVerdict(task *model.LLMReviewTask, verdict *ReviewVerdictResponse, attempt *model.LLMReviewAttempt, cfg *operation_setting.LLMReviewSetting) {
+func applyLLMReviewVerdict(task *model.LLMReviewTask, verdict *ReviewVerdictResponse, attempt *model.LLMReviewAttempt, cfg *operation_setting.LLMReviewSetting, trustedRaw bool) {
 	now := common.GetTimestamp()
 
 	task.Verdict = model.LLMReviewVerdict(verdict.Verdict)
@@ -322,7 +336,7 @@ func applyLLMReviewVerdict(task *model.LLMReviewTask, verdict *ReviewVerdictResp
 			task.SkipReason = reason
 			break
 		}
-		if ShouldAutoBan(verdict, true, cfg) && !model.IsRootUser(task.UserId) {
+		if ShouldAutoBanWithTrust(verdict, true, cfg, task.OutputMode, trustedRaw) && !model.IsRootUser(task.UserId) {
 			banMessage := fmt.Sprintf(
 				"账号因违反本站使用条款已被永久禁用。如认为存在误判，请联系管理员并提供审查编号 %s。",
 				task.ReviewID)

@@ -7,9 +7,66 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
+
+func TestGetUsageAnalysisOptionsIncludesEnabledRoot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousDB, previousLogDB := model.DB, model.LOG_DB
+	previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.Channel{}, &model.Log{}))
+	model.DB, model.LOG_DB = db, db
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = previousDB, previousLogDB
+		common.SetDatabaseTypes(previousMainType, previousLogType)
+		if sqlDB, dbErr := db.DB(); dbErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	root := model.User{Id: 101, Username: "root-admin", AffCode: "root-aff", Role: common.RoleRootUser, Status: common.UserStatusEnabled}
+	member := model.User{Id: 102, Username: "member", AffCode: "member-aff", Role: common.RoleCommonUser, Status: common.UserStatusEnabled}
+	disabledRoot := model.User{Id: 103, Username: "disabled-root", AffCode: "disabled-root-aff", Role: common.RoleRootUser, Status: common.UserStatusDisabled}
+	require.NoError(t, db.Create(&[]model.User{root, member, disabledRoot}).Error)
+	require.NoError(t, db.Create(&model.Token{Id: 201, UserId: member.Id, Name: "member-key", Key: "sk-member", Status: common.TokenStatusEnabled}).Error)
+	require.NoError(t, db.Create(&model.Channel{Id: 301, Name: "test-channel", Key: "channel-key"}).Error)
+	require.NoError(t, db.Create(&model.Log{
+		UserId:    root.Id,
+		CreatedAt: time.Now().Unix(),
+		Type:      model.LogTypeConsume,
+		ModelName: "gpt-test",
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/usage-analysis/options", nil)
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = request
+
+	GetUsageAnalysisOptions(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool                         `json:"success"`
+		Data    UsageAnalysisOptionsResponse `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	assert.Equal(t, root.Id, response.Data.RootUserID)
+	assert.Contains(t, response.Data.Users, UsageAnalysisNamedOption{ID: root.Id, Name: root.Username})
+	assert.NotContains(t, response.Data.Users, UsageAnalysisNamedOption{ID: disabledRoot.Id, Name: disabledRoot.Username})
+	assert.Contains(t, response.Data.Tokens, UsageAnalysisTokenOption{ID: 201, UserID: member.Id, Name: "member-key"})
+	assert.Contains(t, response.Data.Models, "gpt-test")
+	assert.Contains(t, response.Data.Channels, UsageAnalysisNamedOption{ID: 301, Name: "test-channel"})
+}
 
 func TestParseUsageAnalysisQueryRejectsOversizedRange(t *testing.T) {
 	gin.SetMode(gin.TestMode)

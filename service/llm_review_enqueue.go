@@ -83,6 +83,8 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 		}
 	}
 
+	readiness := operation_setting.GetReviewReadiness(cfg)
+	outputMode := readiness.Mode
 	baseTask := &model.LLMReviewTask{
 		UserId:         trigger.UserId,
 		Username:       username,
@@ -99,6 +101,7 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 		ActualInput:    trigger.ActualInput,
 		ActualOutput:   trigger.ActualOutput,
 		RequestSnippet: trigger.RequestSnippet,
+		OutputMode:     outputMode,
 		Payload:        buildPayloadSnapshot(trigger, cfg),
 		MaskedIP:       common.MaskIP(trigger.ClientIP),
 	}
@@ -110,8 +113,9 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 		}
 		return nil
 	}
-
 	// 2. Permanently disabled users: audit-only skipped record.
+	// Preserve these specific audit outcomes before the generic readiness gate;
+	// neither branch can invoke the reviewer or create active work.
 	if banned, _ := model.IsUserPermanentlyBanned(trigger.UserId); banned {
 		if err := model.MarkLLMReviewTaskSkipped(baseTask, model.SkipReasonDisabledUser); err != nil {
 			common.SysLog(fmt.Sprintf("EnqueueLLMReview: record skipped (skipped_disabled) failed: %v", err))
@@ -123,6 +127,16 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 	if inGrace, _, err := model.CheckLLMReviewGrace(trigger.UserId, now); err == nil && inGrace {
 		if err := model.MarkLLMReviewTaskSkipped(baseTask, model.SkipReasonGracePeriod); err != nil {
 			common.SysLog(fmt.Sprintf("EnqueueLLMReview: record skipped (grace_period) failed: %v", err))
+		}
+		return nil
+	}
+
+	// Enabled is not sufficient: stale or incomplete configuration must be
+	// auditable without creating work that the worker cannot safely process.
+	if !readiness.Ready {
+		baseTask.FailureReason = readiness.Reason
+		if err := model.MarkLLMReviewTaskSkipped(baseTask, model.SkipReasonReviewUnavailable); err != nil {
+			common.SysLog(fmt.Sprintf("EnqueueLLMReview: record skipped (review_unavailable) failed: %v", err))
 		}
 		return nil
 	}
@@ -146,6 +160,7 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 		ActualInput:        trigger.ActualInput,
 		ActualOutput:       trigger.ActualOutput,
 		RequestSnippet:     trigger.RequestSnippet,
+		OutputMode:         outputMode,
 		Payload:            buildPayloadSnapshot(trigger, cfg),
 		MaskedIP:           common.MaskIP(trigger.ClientIP),
 		TriggerRPM:         trigger.TriggerType == LLMReviewTriggerRPM,

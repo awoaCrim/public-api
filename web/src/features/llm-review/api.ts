@@ -27,6 +27,7 @@ import type {
   ReviewQueueSummary,
   ReviewSchemaStatus,
   ReviewTask,
+  StructuredOutputMode,
   TestConnectionResult,
 } from './types'
 
@@ -51,10 +52,19 @@ export async function testLLMReviewSchema(
     base_url?: string
     api_key?: string
     model?: string
+    structured_output_mode?: StructuredOutputMode
     timeout_seconds?: number
     allow_private_url?: boolean
   } = {}
-): Promise<ApiResponse<{ ok: boolean; schema_tested: boolean }>> {
+): Promise<
+  ApiResponse<{
+    ok: boolean
+    schema_tested: boolean
+    structured_output_tested: boolean
+    structured_output_mode: StructuredOutputMode
+    model: string
+  }>
+> {
   const res = await api.post(`${REVIEW_BASE}/test_schema`, body)
   return res.data
 }
@@ -64,6 +74,7 @@ export async function testLLMReviewConnection(
     base_url?: string
     api_key?: string
     model?: string
+    structured_output_mode?: StructuredOutputMode
     timeout_seconds?: number
     allow_private_url?: boolean
   } = {}

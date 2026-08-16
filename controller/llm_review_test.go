@@ -78,13 +78,14 @@ func TestUpdateLLMReviewConfigRejectsEnableWithoutSchemaTest(t *testing.T) {
 	cfg := reviewSettingControllerForTest(t)
 	cfg.BaseURL = "https://review.example.com"
 	cfg.ModelName = "reviewer"
+	cfg.PolicyText = "No sharing."
 	cfg.SchemaTested = false
 
 	c, w := newLLMReviewGinContext(t, http.MethodPut, "/api/llm_review/config", `{"enabled":true}`)
 	UpdateLLMReviewConfig(c)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "schema capability")
+	assert.Contains(t, w.Body.String(), "capability test")
 	assert.False(t, cfg.Enabled, "the runtime switch must stay off")
 }
 

@@ -58,11 +58,12 @@ const (
 
 // Skip / supersede reasons (kept separate from status for the admin view).
 const (
-	SkipReasonReviewDisabled = "review_disabled" // master switch off
-	SkipReasonGracePeriod    = "grace_period"
-	SkipReasonManualBan      = "manual_ban_override"   // later manual permanent disable
-	SkipReasonManualUnban    = "manual_unban_override" // later manual re-enable
-	SkipReasonDisabledUser   = "skipped_disabled"      // user already permanently disabled
+	SkipReasonReviewDisabled    = "review_disabled"    // master switch off
+	SkipReasonReviewUnavailable = "review_unavailable" // enabled but not ready
+	SkipReasonGracePeriod       = "grace_period"
+	SkipReasonManualBan         = "manual_ban_override"   // later manual permanent disable
+	SkipReasonManualUnban       = "manual_unban_override" // later manual re-enable
+	SkipReasonDisabledUser      = "skipped_disabled"      // user already permanently disabled
 )
 
 // LLMReviewEvidence is the structured evidence list, persisted as JSON text
@@ -161,11 +162,14 @@ type LLMReviewTask struct {
 	StartedAt     int64               `json:"started_at" gorm:"bigint"`
 	CompletedAt   int64               `json:"completed_at" gorm:"bigint"`
 	ReviewerModel string              `json:"reviewer_model" gorm:"type:varchar(191)"`
-	PolicyID      string              `json:"policy_id" gorm:"type:varchar(64)"`
-	PromptVersion string              `json:"prompt_version" gorm:"type:varchar(64)"`
-	SchemaVersion string              `json:"schema_version" gorm:"type:varchar(64)"`
-	SchemaPassed  bool                `json:"schema_passed"`
-	SchemaError   string              `json:"schema_error" gorm:"type:text"`
+	// OutputMode is the durable structured-output mode used for this task.
+	// It preserves whether a verdict came from strict or compatibility mode.
+	OutputMode    string `json:"output_mode" gorm:"type:varchar(32);index"`
+	PolicyID      string `json:"policy_id" gorm:"type:varchar(64)"`
+	PromptVersion string `json:"prompt_version" gorm:"type:varchar(64)"`
+	SchemaVersion string `json:"schema_version" gorm:"type:varchar(64)"`
+	SchemaPassed  bool   `json:"schema_passed"`
+	SchemaError   string `json:"schema_error" gorm:"type:text"`
 
 	Verdict    LLMReviewVerdict  `json:"verdict" gorm:"type:varchar(32)"`
 	Category   LLMReviewCategory `json:"category" gorm:"type:varchar(64)"`
