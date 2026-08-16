@@ -234,6 +234,12 @@ export function LLMReviewSection() {
       }),
     retry: false,
     onSuccess: (data) => {
+      // The dashboard API uses success:false with HTTP 200 for capability
+      // failures, so refresh cached status even when the probe did not pass.
+      queryClient.invalidateQueries({
+        queryKey: ['llm-review-schema-status'],
+      })
+      queryClient.invalidateQueries({ queryKey: ['llm-review-config'] })
       if (data.success) {
         const mode = data.data?.structured_output_mode
         toast.success(
@@ -241,10 +247,6 @@ export function LLMReviewSection() {
             ? `${t('Structured output capability test passed')}: ${getReviewOutputModeLabel(mode, t)}`
             : t('Structured output capability test passed')
         )
-        queryClient.invalidateQueries({
-          queryKey: ['llm-review-schema-status'],
-        })
-        queryClient.invalidateQueries({ queryKey: ['llm-review-config'] })
       } else {
         toast.error(
           data.message || t('Structured output capability test failed')
@@ -252,6 +254,10 @@ export function LLMReviewSection() {
       }
     },
     onError: (error: Error) => {
+      queryClient.invalidateQueries({
+        queryKey: ['llm-review-schema-status'],
+      })
+      queryClient.invalidateQueries({ queryKey: ['llm-review-config'] })
       toast.error(
         error.message || t('Structured output capability test failed')
       )

@@ -130,6 +130,37 @@ func TestLLMReviewSchemaRejectsConcurrentProbe(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "already in progress")
 }
 
+func TestUpdateLLMReviewConfigRejectsWhileProbeIsInProgress(t *testing.T) {
+	require.True(t, llmReviewSchemaTestMu.TryLock())
+	t.Cleanup(func() { llmReviewSchemaTestMu.Unlock() })
+
+	c, w := newLLMReviewGinContext(t, http.MethodPut, "/api/llm_review/config", `{"base_url":"https://new.example.com"}`)
+	UpdateLLMReviewConfig(c)
+
+	assert.Contains(t, w.Body.String(), "already in progress")
+}
+
+func TestApplyReviewCandidateInvalidatesCapabilityAfterModeChange(t *testing.T) {
+	mode := operation_setting.StructuredOutputModePromptJSON
+	cfg := &operation_setting.LLMReviewSetting{
+		BaseURL:                     "https://review.example.com",
+		ModelName:                   "reviewer",
+		StructuredOutputMode:        operation_setting.StructuredOutputModeJSONObject,
+		StructuredOutputTested:      true,
+		StructuredOutputTestedAt:    123,
+		StructuredOutputTestedModel: "reviewer",
+		StructuredOutputVersion:     "prompt-v2",
+	}
+
+	candidate, err := applyReviewCandidate(cfg, reviewCandidateRequest{StructuredOutputMode: &mode})
+	require.NoError(t, err)
+	assert.Equal(t, mode, candidate.StructuredOutputMode)
+	assert.False(t, candidate.StructuredOutputTested)
+	assert.Zero(t, candidate.StructuredOutputTestedAt)
+	assert.Empty(t, candidate.StructuredOutputTestedModel)
+	assert.Empty(t, candidate.StructuredOutputVersion)
+}
+
 func TestUpdateLLMReviewConfigInvalidatesSchemaOnCriticalChange(t *testing.T) {
 	db := useLLMReviewControllerTestDB(t)
 

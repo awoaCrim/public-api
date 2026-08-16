@@ -66,8 +66,9 @@ type LLMReviewConfigUpdateRequest struct {
 	AllowPrivateURL      *bool    `json:"allow_private_url"`
 }
 
-// llmReviewSchemaTestMu prevents concurrent admin clicks or tabs from starting
-// independent multi-mode capability probes in the same process.
+// llmReviewSchemaTestMu serializes capability probes with critical review
+// configuration changes in the same process, preventing stale probe results
+// from restoring invalidated capability state.
 var llmReviewSchemaTestMu sync.Mutex
 
 // GetLLMReviewConfig returns the review configuration (root).
@@ -128,6 +129,12 @@ func UpdateLLMReviewConfig(c *gin.Context) {
 		common.ApiErrorI18n(c, "common.invalid_params")
 		return
 	}
+	if !llmReviewSchemaTestMu.TryLock() {
+		common.ApiErrorMsg(c, "structured output test already in progress")
+		return
+	}
+	defer llmReviewSchemaTestMu.Unlock()
+
 	cfg := operation_setting.GetLLMReviewSetting()
 
 	updates := map[string]string{}
@@ -316,6 +323,7 @@ func applyReviewCandidate(cfg *operation_setting.LLMReviewSetting, req reviewCan
 		tmp.ModelName = req.ModelName
 	}
 	if req.StructuredOutputMode != nil {
+		criticalConfigChanged = criticalConfigChanged || tmp.StructuredOutputMode != *req.StructuredOutputMode
 		tmp.StructuredOutputMode = *req.StructuredOutputMode
 	}
 	if req.APIKey != "" && !isMaskedAPIKey(req.APIKey) {
@@ -522,6 +530,12 @@ func GetLLMReviewSchemaStatus(c *gin.Context) {
 // ClearLLMReviewAPIKey clears the stored review API key (root) and resets the
 // capability state.
 func ClearLLMReviewAPIKey(c *gin.Context) {
+	if !llmReviewSchemaTestMu.TryLock() {
+		common.ApiErrorMsg(c, "structured output test already in progress")
+		return
+	}
+	defer llmReviewSchemaTestMu.Unlock()
+
 	updates := map[string]string{
 		"llm_review_setting.api_key":                        "",
 		"llm_review_setting.schema_tested":                  "false",
