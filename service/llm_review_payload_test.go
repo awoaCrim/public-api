@@ -48,6 +48,47 @@ func TestValidateLLMReviewVerdictCompatibilityFields(t *testing.T) {
 	assert.Contains(t, strictErr, "unknown field")
 }
 
+func TestValidateLLMReviewVerdictCompatibilityConfidenceString(t *testing.T) {
+	data := []byte(`{"verdict":"violation","category":"limit_bypass","confidence":"0.92","reason":"r","evidence":["e"]}`)
+
+	verdict, compatibilityPassed, compatibilityErr := ValidateLLMReviewVerdict(data)
+	require.True(t, compatibilityPassed, compatibilityErr)
+	require.NotNil(t, verdict)
+	assert.Equal(t, 0.92, verdict.Confidence)
+
+	_, strictPassed, strictErr := ValidateStrictLLMReviewVerdict(data)
+	assert.False(t, strictPassed)
+	assert.Contains(t, strictErr, "invalid verdict fields")
+}
+
+func TestValidateLLMReviewVerdictCompatibilityConfidenceStringValidation(t *testing.T) {
+	cases := []struct {
+		name       string
+		confidence string
+		wantOK     bool
+	}{
+		{name: "lower boundary", confidence: "0", wantOK: true},
+		{name: "upper boundary", confidence: "1", wantOK: true},
+		{name: "scientific notation", confidence: "9.2e-1", wantOK: true},
+		{name: "percentage", confidence: "92%"},
+		{name: "unit", confidence: "0.92 score"},
+		{name: "empty", confidence: ""},
+		{name: "whitespace", confidence: " 0.92"},
+		{name: "nan", confidence: "NaN"},
+		{name: "infinity", confidence: "Inf"},
+		{name: "above upper boundary", confidence: "1.01"},
+		{name: "below lower boundary", confidence: "-0.1"},
+		{name: "ambiguous hexadecimal", confidence: "0x1p-2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte(`{"verdict":"violation","category":"limit_bypass","confidence":"` + tc.confidence + `","reason":"r","evidence":["e"]}`)
+			_, passed, errMsg := ValidateLLMReviewVerdict(data)
+			assert.Equal(t, tc.wantOK, passed, errMsg)
+		})
+	}
+}
+
 func TestValidateLLMReviewVerdictCompatibilityNormalizesUncertainCategory(t *testing.T) {
 	data := []byte(`{"verdict":"uncertain","category":"uncertain","confidence":0.2,"reason":"insufficient evidence","evidence":["probe"]}`)
 

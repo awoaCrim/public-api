@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -57,6 +59,22 @@ func validateLLMReviewVerdict(data []byte, rejectUnknownFields bool) (*ReviewVer
 				return nil, false, "unknown field: " + field
 			}
 		}
+	} else if confidence, ok := fields["confidence"].(string); ok {
+		parsedConfidence, err := parseCompatibilityConfidence(confidence)
+		if err != nil {
+			return nil, false, "invalid verdict fields: " + err.Error()
+		}
+		// Re-encode through the project JSON helpers so the normal typed decode
+		// remains the single source of truth for the rest of the verdict.
+		fields["confidence"] = parsedConfidence
+		normalizedData, err := common.Marshal(fields)
+		if err != nil {
+			return nil, false, "invalid verdict fields: " + err.Error()
+		}
+		data = normalizedData
+	}
+	if fields["confidence"] == nil {
+		return nil, false, "invalid verdict fields: confidence must be a number"
 	}
 
 	var resp ReviewVerdictResponse
@@ -85,6 +103,76 @@ func validateLLMReviewVerdict(data []byte, rejectUnknownFields bool) (*ReviewVer
 		return nil, false, "evidence must be a non-empty array"
 	}
 	return &resp, true, ""
+}
+
+// parseCompatibilityConfidence accepts only a JSON-compatible decimal number
+// written as a string. Providers using compatibility output occasionally
+// quote this field, but values with whitespace, units, percentages, NaN, or
+// infinity are intentionally rejected.
+func parseCompatibilityConfidence(value string) (float64, error) {
+	if !isDecimalNumber(value) {
+		return 0, errors.New("confidence must be a pure numeric string")
+	}
+	confidence, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(confidence) || math.IsInf(confidence, 0) {
+		return 0, errors.New("confidence must be a finite numeric string")
+	}
+	if confidence < 0 || confidence > 1 {
+		return 0, errors.New("confidence must be in [0,1]")
+	}
+	return confidence, nil
+}
+
+// isDecimalNumber matches the JSON number grammar, avoiding strconv formats
+// such as hexadecimal values and leading signs that are not unambiguous JSON
+// numeric representations.
+func isDecimalNumber(value string) bool {
+	if value == "" || strings.TrimSpace(value) != value {
+		return false
+	}
+	i := 0
+	if value[i] == '-' {
+		i++
+		if i == len(value) {
+			return false
+		}
+	}
+	if value[i] == '0' {
+		i++
+		if i < len(value) && value[i] >= '0' && value[i] <= '9' {
+			return false
+		}
+	} else if value[i] >= '1' && value[i] <= '9' {
+		for i < len(value) && value[i] >= '0' && value[i] <= '9' {
+			i++
+		}
+	} else {
+		return false
+	}
+	if i < len(value) && value[i] == '.' {
+		i++
+		fractionStart := i
+		for i < len(value) && value[i] >= '0' && value[i] <= '9' {
+			i++
+		}
+		if i == fractionStart {
+			return false
+		}
+	}
+	if i < len(value) && (value[i] == 'e' || value[i] == 'E') {
+		i++
+		if i < len(value) && (value[i] == '+' || value[i] == '-') {
+			i++
+		}
+		exponentStart := i
+		for i < len(value) && value[i] >= '0' && value[i] <= '9' {
+			i++
+		}
+		if i == exponentStart {
+			return false
+		}
+	}
+	return i == len(value)
 }
 
 // ShouldAutoBan decides whether a verdict triggers an automatic permanent
