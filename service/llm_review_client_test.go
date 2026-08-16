@@ -192,6 +192,8 @@ func TestBuildReviewChatRequestPinsDeterministicContract(t *testing.T) {
 	messages, ok := req["messages"].([]any)
 	require.True(t, ok)
 	require.Len(t, messages, 2)
+	systemMsg := messages[0].(map[string]any)["content"].(string)
+	assert.Contains(t, systemMsg, "category 必须填写 none")
 	userMsg := messages[1].(map[string]any)["content"].(string)
 	assert.Contains(t, userMsg, "No account sharing.")
 }
@@ -230,6 +232,34 @@ func TestTestStructuredOutputCapabilityFallsBackToJSONMode(t *testing.T) {
 			return
 		}
 		_, _ = w.Write([]byte(reviewVerdictBody("uncertain", "none", 0.2)))
+	}))
+	defer server.Close()
+
+	cfg := &operation_setting.LLMReviewSetting{
+		BaseURL:             server.URL,
+		ModelName:           "reviewer",
+		TimeoutSeconds:      5,
+		AllowPrivateAddress: true,
+	}
+	result, err := NewReviewClient(cfg).TestStructuredOutputCapability(context.Background())
+	require.NoError(t, err)
+	assert.True(t, result.Passed)
+	assert.Equal(t, operation_setting.StructuredOutputModeJSONObject, result.Mode)
+	assert.Equal(t, 2, calls)
+}
+
+func TestTestStructuredOutputCapabilityNormalizesUncertainCategoryInCompatibilityMode(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req map[string]any
+		require.NoError(t, common.DecodeJson(r.Body, &req))
+		format, _ := req["response_format"].(map[string]any)
+		if format["type"] == "json_schema" {
+			_, _ = w.Write([]byte(reviewVerdictBody("uncertain", "uncertain", 0.2)))
+			return
+		}
+		_, _ = w.Write([]byte(reviewVerdictBody("uncertain", "uncertain", 0.2)))
 	}))
 	defer server.Close()
 

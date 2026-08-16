@@ -68,6 +68,13 @@ func validateLLMReviewVerdict(data []byte, rejectUnknownFields bool) (*ReviewVer
 	default:
 		return nil, false, "verdict must be violation|compliant|uncertain"
 	}
+	// Compatibility providers sometimes mirror the uncertain verdict into the
+	// category field. Treat that unambiguous no-category alias as "none" only
+	// outside strict mode; strict capability checks must still enforce the
+	// declared JSON Schema exactly.
+	if !rejectUnknownFields && resp.Verdict == "uncertain" && resp.Category == "uncertain" {
+		resp.Category = string(model.LLMReviewCategoryNone)
+	}
 	if !IsValidReviewCategory(resp.Category) {
 		return nil, false, "invalid category: " + resp.Category
 	}

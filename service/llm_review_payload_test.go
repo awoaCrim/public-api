@@ -48,6 +48,19 @@ func TestValidateLLMReviewVerdictCompatibilityFields(t *testing.T) {
 	assert.Contains(t, strictErr, "unknown field")
 }
 
+func TestValidateLLMReviewVerdictCompatibilityNormalizesUncertainCategory(t *testing.T) {
+	data := []byte(`{"verdict":"uncertain","category":"uncertain","confidence":0.2,"reason":"insufficient evidence","evidence":["probe"]}`)
+
+	verdict, compatibilityPassed, compatibilityErr := ValidateLLMReviewVerdict(data)
+	require.True(t, compatibilityPassed, compatibilityErr)
+	require.NotNil(t, verdict)
+	assert.Equal(t, "none", verdict.Category)
+
+	_, strictPassed, strictErr := ValidateStrictLLMReviewVerdict(data)
+	assert.False(t, strictPassed)
+	assert.Contains(t, strictErr, "invalid category")
+}
+
 func TestShouldAutoBanGating(t *testing.T) {
 	cfg := llmReviewSettingForTest(t)
 	cfg.SchemaTested = true

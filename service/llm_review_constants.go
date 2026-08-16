@@ -7,7 +7,7 @@ const (
 	// ReviewPolicyID identifies the policy carried in review payloads.
 	ReviewPolicyID = "policy-v1"
 	// ReviewPromptVersion is the reviewer prompt template version.
-	ReviewPromptVersion = "prompt-v1"
+	ReviewPromptVersion = "prompt-v2"
 	// ReviewSchemaVersion is the strict JSON schema version.
 	ReviewSchemaVersion = "schema-v1"
 
