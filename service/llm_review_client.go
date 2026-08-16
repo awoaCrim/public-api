@@ -373,15 +373,20 @@ type StructuredOutputCapabilityResult struct {
 }
 
 // TestStructuredOutputCapability probes strict output first, then the two
-// explicit compatibility modes. Fallback is limited to a structured-output
-// rejection or an invalid probe result; authentication, transport, rate-limit,
-// endpoint, and server failures are returned without hiding them.
+// explicit compatibility modes. A previously passed persisted mode is
+// revalidated on its own to avoid unnecessary upstream requests. Fallback is
+// limited to a structured-output rejection or an invalid probe result;
+// authentication, transport, rate-limit, endpoint, and server failures are
+// returned without hiding them.
 func (c *ReviewClient) TestStructuredOutputCapability(ctx context.Context) (StructuredOutputCapabilityResult, error) {
 	if c.cfg.BaseURL == "" || c.cfg.ModelName == "" {
 		return StructuredOutputCapabilityResult{}, errors.New("review client not configured")
 	}
 	probePayload := `{"request_snippet":"capability probe","policy_text":"仅测试 JSON 输出格式，不作真实裁决。"}`
 	modes := []string{operation_setting.StructuredOutputModeStrictSchema, operation_setting.StructuredOutputModeJSONObject, operation_setting.StructuredOutputModePromptJSON}
+	if c.cfg.StructuredOutputTested || c.cfg.SchemaTested {
+		modes = []string{operation_setting.EffectiveStructuredOutputMode(c.cfg)}
+	}
 	var lastErr string
 	for _, mode := range modes {
 		body, err := c.BuildReviewChatRequestForMode(probePayload, mode)

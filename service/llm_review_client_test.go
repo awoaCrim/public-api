@@ -307,6 +307,55 @@ func TestTestStructuredOutputCapabilityDoesNotTrustRepairedStrictResponse(t *tes
 	assert.Equal(t, 2, calls)
 }
 
+func TestTestStructuredOutputCapabilityRevalidatesPersistedCompatibilityMode(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req map[string]any
+		require.NoError(t, common.DecodeJson(r.Body, &req))
+		require.Equal(t, map[string]any{"type": "json_object"}, req["response_format"])
+		_, _ = w.Write([]byte(reviewVerdictBody("uncertain", "none", 0.2)))
+	}))
+	defer server.Close()
+
+	cfg := &operation_setting.LLMReviewSetting{
+		BaseURL:                server.URL,
+		ModelName:              "reviewer",
+		TimeoutSeconds:         5,
+		AllowPrivateAddress:    true,
+		StructuredOutputMode:   operation_setting.StructuredOutputModeJSONObject,
+		StructuredOutputTested: true,
+	}
+	result, err := NewReviewClient(cfg).TestStructuredOutputCapability(context.Background())
+	require.NoError(t, err)
+	assert.True(t, result.Passed)
+	assert.Equal(t, operation_setting.StructuredOutputModeJSONObject, result.Mode)
+	assert.Equal(t, 1, calls)
+}
+
+func TestTestStructuredOutputCapabilityDoesNotFallbackOnRateLimit(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limit exceeded"}}`))
+	}))
+	defer server.Close()
+
+	cfg := &operation_setting.LLMReviewSetting{
+		BaseURL:             server.URL,
+		ModelName:           "reviewer",
+		TimeoutSeconds:      5,
+		AllowPrivateAddress: true,
+	}
+	result, err := NewReviewClient(cfg).TestStructuredOutputCapability(context.Background())
+	require.NoError(t, err)
+	assert.False(t, result.Passed)
+	assert.Equal(t, operation_setting.StructuredOutputModeStrictSchema, result.Mode)
+	assert.Contains(t, result.Error, "http 429")
+	assert.Equal(t, 1, calls)
+}
+
 func TestTestStructuredOutputCapabilityDoesNotFallbackOnAuthFailure(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

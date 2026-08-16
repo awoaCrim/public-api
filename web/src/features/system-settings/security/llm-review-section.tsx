@@ -26,7 +26,7 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -232,6 +232,7 @@ export function LLMReviewSection() {
         timeout_seconds: timeoutSeconds,
         allow_private_url: allowPrivateUrl,
       }),
+    retry: false,
     onSuccess: (data) => {
       if (data.success) {
         const mode = data.data?.structured_output_mode
@@ -256,6 +257,19 @@ export function LLMReviewSection() {
       )
     },
   })
+  const schemaTestInFlightRef = useRef(false)
+
+  async function runSchemaTest() {
+    if (schemaTestInFlightRef.current || schemaTestMutation.isPending) return
+    schemaTestInFlightRef.current = true
+    try {
+      await schemaTestMutation.mutateAsync()
+    } catch {
+      // The mutation's onError handler already shows the user-facing error.
+    } finally {
+      schemaTestInFlightRef.current = false
+    }
+  }
 
   const schemaStatusQuery = useQuery({
     queryKey: ['llm-review-schema-status'],
@@ -557,7 +571,7 @@ export function LLMReviewSection() {
                   testConnectionMutation.isPending ||
                   schemaTestMutation.isPending
                 }
-                onClick={() => schemaTestMutation.mutate()}
+                onClick={() => void runSchemaTest()}
               >
                 {schemaTestMutation.isPending ? (
                   <Loader2 className='animate-spin' data-icon='inline-start' />

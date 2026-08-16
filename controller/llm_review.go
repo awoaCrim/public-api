@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -64,6 +65,10 @@ type LLMReviewConfigUpdateRequest struct {
 	MaxOutputTokens      *int     `json:"max_output_tokens"`
 	AllowPrivateURL      *bool    `json:"allow_private_url"`
 }
+
+// llmReviewSchemaTestMu prevents concurrent admin clicks or tabs from starting
+// independent multi-mode capability probes in the same process.
+var llmReviewSchemaTestMu sync.Mutex
 
 // GetLLMReviewConfig returns the review configuration (root).
 func GetLLMReviewConfig(c *gin.Context) {
@@ -301,10 +306,13 @@ type reviewCandidateRequest struct {
 // struct only and never persisted here.
 func applyReviewCandidate(cfg *operation_setting.LLMReviewSetting, req reviewCandidateRequest) (*operation_setting.LLMReviewSetting, error) {
 	tmp := *cfg
+	criticalConfigChanged := false
 	if req.BaseURL != "" {
+		criticalConfigChanged = criticalConfigChanged || tmp.BaseURL != req.BaseURL
 		tmp.BaseURL = req.BaseURL
 	}
 	if req.ModelName != "" {
+		criticalConfigChanged = criticalConfigChanged || tmp.ModelName != req.ModelName
 		tmp.ModelName = req.ModelName
 	}
 	if req.StructuredOutputMode != nil {
@@ -316,12 +324,25 @@ func applyReviewCandidate(cfg *operation_setting.LLMReviewSetting, req reviewCan
 			return nil, err
 		}
 		tmp.APIKeyEncrypted = enc
+		criticalConfigChanged = true
 	}
 	if req.TimeoutSeconds != nil {
 		tmp.TimeoutSeconds = *req.TimeoutSeconds
 	}
 	if req.AllowPrivateURL != nil {
+		criticalConfigChanged = criticalConfigChanged || tmp.AllowPrivateAddress != *req.AllowPrivateURL
 		tmp.AllowPrivateAddress = *req.AllowPrivateURL
+	}
+	if criticalConfigChanged {
+		tmp.SchemaTested = false
+		tmp.SchemaTestedAt = 0
+		tmp.SchemaTestedModel = ""
+		tmp.SchemaVersion = ""
+		tmp.StructuredOutputTested = false
+		tmp.StructuredOutputTestedAt = 0
+		tmp.StructuredOutputTestedModel = ""
+		tmp.StructuredOutputVersion = ""
+		tmp.TestError = ""
 	}
 	return &tmp, nil
 }
@@ -355,6 +376,12 @@ func TestLLMReviewConnection(c *gin.Context) {
 // passing test persists the tested critical config and selected mode; a failing
 // test persists the masked error.
 func TestLLMReviewSchema(c *gin.Context) {
+	if !llmReviewSchemaTestMu.TryLock() {
+		common.ApiErrorMsg(c, "structured output test already in progress")
+		return
+	}
+	defer llmReviewSchemaTestMu.Unlock()
+
 	var req reviewCandidateRequest
 	_ = common.DecodeJson(c.Request.Body, &req)
 

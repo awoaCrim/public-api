@@ -100,6 +100,36 @@ func TestUpdateLLMReviewConfigRejectsEnableWithoutConfig(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "not fully configured")
 }
 
+func TestApplyReviewCandidateInvalidatesCapabilityAfterModelChange(t *testing.T) {
+	cfg := &operation_setting.LLMReviewSetting{
+		BaseURL:                     "https://review.example.com",
+		ModelName:                   "old-model",
+		StructuredOutputMode:        operation_setting.StructuredOutputModeJSONObject,
+		StructuredOutputTested:      true,
+		StructuredOutputTestedAt:    123,
+		StructuredOutputTestedModel: "old-model",
+		StructuredOutputVersion:     "prompt-v2",
+	}
+
+	candidate, err := applyReviewCandidate(cfg, reviewCandidateRequest{ModelName: "new-model"})
+	require.NoError(t, err)
+	assert.Equal(t, "new-model", candidate.ModelName)
+	assert.False(t, candidate.StructuredOutputTested)
+	assert.Zero(t, candidate.StructuredOutputTestedAt)
+	assert.Empty(t, candidate.StructuredOutputTestedModel)
+	assert.Empty(t, candidate.StructuredOutputVersion)
+}
+
+func TestLLMReviewSchemaRejectsConcurrentProbe(t *testing.T) {
+	require.True(t, llmReviewSchemaTestMu.TryLock())
+	t.Cleanup(func() { llmReviewSchemaTestMu.Unlock() })
+
+	c, w := newLLMReviewGinContext(t, http.MethodPost, "/api/llm_review/test_schema", `{}`)
+	TestLLMReviewSchema(c)
+
+	assert.Contains(t, w.Body.String(), "already in progress")
+}
+
 func TestUpdateLLMReviewConfigInvalidatesSchemaOnCriticalChange(t *testing.T) {
 	db := useLLMReviewControllerTestDB(t)
 
