@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { RateLimitSection } from '../request-limits/rate-limit-section'
+import { ReviewTriggerLimitsSection } from '../request-limits/review-trigger-limits-section'
 import { SensitiveWordsSection } from '../request-limits/sensitive-words-section'
 import { SSRFSection } from '../request-limits/ssrf-section'
 import { TokenLimitSection } from '../request-limits/token-limit-section'
@@ -38,6 +39,26 @@ const SECURITY_SECTIONS = [
           ModelRequestRateLimitDurationMinutes:
             settings.ModelRequestRateLimitDurationMinutes,
           ModelRequestRateLimitGroup: settings.ModelRequestRateLimitGroup,
+        }}
+      />
+    ),
+  },
+  {
+    id: 'review-trigger-limits',
+    titleKey: 'LLM Review Trigger Limits',
+    build: (settings: SecuritySettings) => (
+      <ReviewTriggerLimitsSection
+        defaultValues={{
+          'rate_limit_ban_setting.enabled':
+            settings['rate_limit_ban_setting.enabled'],
+          'rate_limit_ban_setting.max_rpm':
+            settings['rate_limit_ban_setting.max_rpm'],
+          'rate_limit_ban_setting.max_input_tokens':
+            settings['rate_limit_ban_setting.max_input_tokens'],
+          'rate_limit_ban_setting.max_output_tokens':
+            settings['rate_limit_ban_setting.max_output_tokens'],
+          'rate_limit_ban_setting.whitelist_models':
+            settings['rate_limit_ban_setting.whitelist_models'],
         }}
       />
     ),
