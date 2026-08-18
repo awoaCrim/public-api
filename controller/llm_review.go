@@ -641,6 +641,8 @@ func llmReviewTaskDetail(task *model.LLMReviewTask, attempts []*model.LLMReviewA
 	h["review_payload"] = task.Payload
 	h["evidence"] = task.Evidence
 	h["raw_response"] = task.RawResponse
+	h["skip_reason"] = task.SkipReason
+	h["failure_reason"] = task.FailureReason
 	h["schema_valid"] = task.SchemaPassed
 	h["schema_error"] = task.SchemaError
 	h["review_model"] = task.ReviewerModel
@@ -649,6 +651,7 @@ func llmReviewTaskDetail(task *model.LLMReviewTask, attempts []*model.LLMReviewA
 	h["prompt_template_version"] = task.PromptVersion
 	h["schema_version"] = task.SchemaVersion
 	h["human_override"] = task.SupersededBy
+	h["retryable"] = model.IsLLMReviewTaskRetryable(task)
 	h["attempts"] = attempts
 	return h
 }
@@ -679,8 +682,8 @@ func GetLLMReviewTaskDetail(c *gin.Context) {
 	common.ApiSuccess(c, llmReviewTaskDetail(task, attempts))
 }
 
-// RetryLLMReviewTask re-queues a failed/uncertain task. The router enforces
-// the llm_review.read permission.
+// RetryLLMReviewTask re-queues a failed/uncertain task or a recoverable
+// skipped task. The router enforces the llm_review.read permission.
 func RetryLLMReviewTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {

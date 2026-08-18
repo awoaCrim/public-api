@@ -229,8 +229,8 @@ func TestListLLMReviewTasksReturnsRows(t *testing.T) {
 	db := useLLMReviewControllerTestDB(t)
 
 	require.NoError(t, db.Create(&model.LLMReviewTask{
-		UserId: 1, Username: "alice", ModelName: "gpt-4o", Status: model.LLMReviewTaskPending,
-		ReviewID: "rev-test-1",
+		UserId: 1, Username: "alice", ModelName: "gpt-4o", Status: model.LLMReviewTaskSkipped,
+		SkipReason: "review_unavailable", FailureReason: "policy text is required", ReviewID: "rev-test-1",
 	}).Error)
 
 	c, w := newLLMReviewGinContext(t, http.MethodGet, "/api/llm_review/tasks?page=1&page_size=20", "")
@@ -240,12 +240,58 @@ func TestListLLMReviewTasksReturnsRows(t *testing.T) {
 	var body struct {
 		Success bool `json:"success"`
 		Data    struct {
-			Total int `json:"total"`
+			Total int              `json:"total"`
+			Data  []map[string]any `json:"data"`
 		} `json:"data"`
 	}
 	require.NoError(t, common.Unmarshal(w.Body.Bytes(), &body))
 	assert.True(t, body.Success)
 	assert.Equal(t, 1, body.Data.Total)
+	require.Len(t, body.Data.Data, 1)
+	assert.NotContains(t, body.Data.Data[0], "skip_reason", "list contract must not expose detail-only diagnostics")
+}
+
+func TestGetLLMReviewTaskDetailIncludesDiagnosticsAndAttempts(t *testing.T) {
+	db := useLLMReviewControllerTestDB(t)
+	require.NoError(t, db.Create(&model.LLMReviewTask{
+		UserId:        1,
+		Username:      "alice",
+		ModelName:     "gpt-4o",
+		Status:        model.LLMReviewTaskSkipped,
+		SkipReason:    "review_unavailable",
+		FailureReason: "policy text is required",
+		RawResponse:   `{"verdict":"uncertain"}`,
+		ReviewID:      "rev-detail-1",
+	}).Error)
+	require.NoError(t, db.Create(&model.LLMReviewAttempt{
+		TaskId:     1,
+		AttemptNo:  1,
+		RequestAt:  100,
+		HTTPStatus: 200,
+		Response:   "not json",
+		ParseError: "invalid character 'd'",
+	}).Error)
+
+	c, w := newLLMReviewGinContext(t, http.MethodGet, "/api/llm_review/tasks/1", "")
+	GetLLMReviewTaskDetail(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Success bool           `json:"success"`
+		Data    map[string]any `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(w.Body.Bytes(), &body))
+	assert.True(t, body.Success)
+	assert.Equal(t, "review_unavailable", body.Data["skip_reason"])
+	assert.Equal(t, "policy text is required", body.Data["failure_reason"])
+	assert.Equal(t, `{"verdict":"uncertain"}`, body.Data["raw_response"])
+	attempts, ok := body.Data["attempts"].([]any)
+	require.True(t, ok)
+	require.Len(t, attempts, 1)
+	attempt, ok := attempts[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "not json", attempt["response"])
+	assert.Equal(t, "invalid character 'd'", attempt["parse_error"])
 }
 
 func useLLMReviewControllerTestDB(t *testing.T) *gorm.DB {

@@ -128,9 +128,15 @@ const usageData = {
   trend: [],
 }
 
-function optionsData(rootUserId: number) {
+function optionsData(
+  rootUserId: number,
+  additionalUsers: { id: number; name: string }[] = []
+) {
   return {
-    users: rootUserId > 0 ? [{ id: rootUserId, name: 'root-admin' }] : [],
+    users: [
+      ...(rootUserId > 0 ? [{ id: rootUserId, name: 'root-admin' }] : []),
+      ...additionalUsers,
+    ],
     tokens: [],
     models: [],
     channels: [],
@@ -145,16 +151,24 @@ async function waitForCondition(
   if (condition()) return
 
   await new Promise<void>((resolve, reject) => {
-    const observer = new MutationObserver(() => {
-      if (!condition()) return
+    let settled = false
+    const finish = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      clearInterval(intervalId)
       clearTimeout(timeoutId)
       observer.disconnect()
-      resolve()
-    })
-    const timeoutId = setTimeout(() => {
-      observer.disconnect()
-      reject(new Error(failureMessage))
-    }, 1500)
+      callback()
+    }
+    const check = () => {
+      if (condition()) finish(resolve)
+    }
+    const observer = new MutationObserver(check)
+    const intervalId = setInterval(check, 10)
+    const timeoutId = setTimeout(
+      () => finish(() => reject(new Error(failureMessage))),
+      1500
+    )
 
     observer.observe(document, {
       attributes: true,
@@ -286,6 +300,91 @@ describe('usage analysis initial query scope', () => {
         container.textContent ?? '',
         /Root user could not be resolved/
       )
+    } finally {
+      await act(async () => root.unmount())
+      container.remove()
+      queryClient.clear()
+      api.get = originalGet
+    }
+  })
+
+  test('preserves a manually selected user after Root initialization', async () => {
+    const originalGet = api.get
+    const calls: string[] = []
+    api.get = (async (...args: unknown[]) => {
+      const url = String(args[0])
+      calls.push(url)
+      if (url === '/api/usage-analysis/options') {
+        return {
+          data: {
+            success: true,
+            data: optionsData(42, [{ id: 7, name: 'member' }]),
+          },
+        }
+      }
+      return { data: { success: true, data: usageData } }
+    }) as typeof api.get
+
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    try {
+      await act(async () => {
+        root.render(
+          <QueryClientProvider client={queryClient}>
+            <I18nextProvider i18n={i18n}>
+              <UsageAnalysis />
+            </I18nextProvider>
+          </QueryClientProvider>
+        )
+      })
+      await act(async () => {
+        await waitForCondition(
+          () => calls.some((url) => url.startsWith('/api/usage-analysis?')),
+          `initial usage analysis query was not started: ${JSON.stringify(calls)}`
+        )
+      })
+
+      const userTrigger = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Select User"]'
+      )
+      assert.ok(userTrigger)
+      await act(async () => userTrigger.click())
+      const memberOption = [
+        ...document.querySelectorAll<HTMLElement>('[role="option"]'),
+      ].find((option) => option.textContent === 'member')
+      assert.ok(memberOption)
+      await act(async () => memberOption.click())
+
+      const refreshButton = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Refresh usage analysis"]'
+      )
+      assert.ok(refreshButton)
+      await act(async () => refreshButton.click())
+      await act(async () => {
+        await waitForCondition(
+          () =>
+            calls.some((url) => {
+              if (!url.startsWith('/api/usage-analysis?')) return false
+              return (
+                new URLSearchParams(url.split('?')[1]).get('user_id') === '7'
+              )
+            }),
+          `manual user query was not started: ${JSON.stringify(calls)}`
+        )
+      })
+
+      const analysisURL = calls.find((url) => {
+        if (!url.startsWith('/api/usage-analysis?')) return false
+        return new URLSearchParams(url.split('?')[1]).get('user_id') === '7'
+      })
+      assert.ok(analysisURL)
+      const query = new URLSearchParams(analysisURL.split('?')[1])
+      assert.equal(query.get('user_id'), '7')
     } finally {
       await act(async () => root.unmount())
       container.remove()

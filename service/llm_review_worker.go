@@ -174,7 +174,13 @@ func processLLMReviewTask(task *model.LLMReviewTask) {
 	}
 
 	readiness := operation_setting.GetReviewReadiness(cfg)
-	if !cfg.Enabled || !readiness.Ready {
+	if !cfg.Enabled {
+		task.FailureReason = "review service is disabled"
+		_ = model.MarkLLMReviewTaskSkipped(task, model.SkipReasonReviewDisabled)
+		return
+	}
+	if !readiness.Ready {
+		task.FailureReason = readiness.Reason
 		_ = model.MarkLLMReviewTaskSkipped(task, model.SkipReasonReviewUnavailable)
 		return
 	}

@@ -206,6 +206,72 @@ func TestParseRawLLMResponse(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestNormalizeRawLLMResponseOpenAISSE(t *testing.T) {
+	makeEvent := func(content string) string {
+		event, err := common.Marshal(map[string]any{
+			"choices": []any{map[string]any{
+				"delta": map[string]any{"content": content},
+			}},
+		})
+		require.NoError(t, err)
+		return "data: " + string(event) + "\n\n"
+	}
+
+	body := makeEvent(`{"verdict":"compliant","category":"none","confidence":`) +
+		makeEvent(`0.9,"reason":"ok","evidence":["e"]}`) +
+		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20,\"total_tokens\":30}}\n\n" +
+		"data: [DONE]\n\n"
+	normalized, err := NormalizeRawLLMResponse([]byte(body))
+	require.NoError(t, err)
+	assert.Equal(t, `{"verdict":"compliant","category":"none","confidence":0.9,"reason":"ok","evidence":["e"]}`, normalized.Content)
+	assert.False(t, normalized.Repaired)
+	_, passed, validationErr := ValidateStrictLLMReviewVerdict([]byte(normalized.Content))
+	assert.True(t, passed, validationErr)
+}
+
+func TestNormalizeRawLLMResponseOpenAISSEMessageContent(t *testing.T) {
+	event, err := common.Marshal(map[string]any{
+		"choices": []any{map[string]any{
+			"message": map[string]any{"content": `{"verdict":"compliant"}`},
+		}},
+	})
+	require.NoError(t, err)
+	normalized, err := NormalizeRawLLMResponse([]byte("data: " + string(event) + "\n\ndata: [DONE]\n\n"))
+	require.NoError(t, err)
+	assert.Equal(t, `{"verdict":"compliant"}`, normalized.Content)
+}
+
+func TestNormalizeRawLLMResponseRejectsMalformedOpenAISSE(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"no data", ": keep-alive\n\ndata: [DONE]\n\n"},
+		{"bad event", "data: {not-json}\n\ndata: [DONE]\n\n"},
+		{"no content", "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\ndata: [DONE]\n\n"},
+		{"usage only", "data: {\"choices\":[],\"usage\":{\"total_tokens\":30}}\n\ndata: [DONE]\n\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NormalizeRawLLMResponse([]byte(tc.body))
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestNormalizeRawLLMResponseOpenAISSERepairedContent(t *testing.T) {
+	event, err := common.Marshal(map[string]any{
+		"choices": []any{map[string]any{
+			"delta": map[string]any{"content": "```json\n{\"verdict\":\"compliant\"}\n```"},
+		}},
+	})
+	require.NoError(t, err)
+	normalized, err := NormalizeRawLLMResponse([]byte("data: " + string(event) + "\n\ndata: [DONE]\n\n"))
+	require.NoError(t, err)
+	assert.Equal(t, `{"verdict":"compliant"}`, normalized.Content)
+	assert.True(t, normalized.Repaired)
+}
+
 func TestBuildPayloadSnapshotSanitizedContract(t *testing.T) {
 	originalSecret := common.CryptoSecret
 	common.CryptoSecret = "review-payload-test-secret"

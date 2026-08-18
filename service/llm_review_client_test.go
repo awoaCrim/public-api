@@ -219,6 +219,33 @@ func TestBuildReviewChatRequestSupportsCompatibilityModes(t *testing.T) {
 	assert.Contains(t, promptMessages[0].(map[string]any)["content"].(string), "兼容输出要求")
 }
 
+func TestTestStructuredOutputCapabilityAcceptsOpenAISSE(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		event, err := common.Marshal(map[string]any{
+			"choices": []any{map[string]any{
+				"delta": map[string]any{"content": `{"verdict":"uncertain","category":"none","confidence":0.2,"reason":"probe","evidence":["e"]}`},
+			}},
+		})
+		require.NoError(t, err)
+		_, _ = w.Write([]byte("data: " + string(event) + "\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	cfg := &operation_setting.LLMReviewSetting{
+		BaseURL:             server.URL,
+		ModelName:           "reviewer",
+		TimeoutSeconds:      5,
+		AllowPrivateAddress: true,
+	}
+	result, err := NewReviewClient(cfg).TestStructuredOutputCapability(context.Background())
+	require.NoError(t, err)
+	assert.True(t, result.Passed, result.Error)
+	assert.Equal(t, operation_setting.StructuredOutputModeStrictSchema, result.Mode)
+	assert.Equal(t, 1, calls)
+}
+
 func TestTestStructuredOutputCapabilityFallsBackToJSONMode(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -260,6 +287,36 @@ func TestTestStructuredOutputCapabilityNormalizesUncertainCategoryInCompatibilit
 			return
 		}
 		_, _ = w.Write([]byte(reviewVerdictBody("uncertain", "uncertain", 0.2)))
+	}))
+	defer server.Close()
+
+	cfg := &operation_setting.LLMReviewSetting{
+		BaseURL:             server.URL,
+		ModelName:           "reviewer",
+		TimeoutSeconds:      5,
+		AllowPrivateAddress: true,
+	}
+	result, err := NewReviewClient(cfg).TestStructuredOutputCapability(context.Background())
+	require.NoError(t, err)
+	assert.True(t, result.Passed)
+	assert.Equal(t, operation_setting.StructuredOutputModeJSONObject, result.Mode)
+	assert.Equal(t, 2, calls)
+}
+
+func TestTestStructuredOutputCapabilityDoesNotTrustRepairedSSE(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req map[string]any
+		require.NoError(t, common.DecodeJson(r.Body, &req))
+		format, _ := req["response_format"].(map[string]any)
+		if format["type"] == "json_schema" {
+			content, marshalErr := common.Marshal("```json\n{\"verdict\":\"uncertain\",\"category\":\"none\",\"confidence\":0.2,\"reason\":\"r\",\"evidence\":[\"e\"]}\n```")
+			require.NoError(t, marshalErr)
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":" + string(content) + "}}]}\n\ndata: [DONE]\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte(reviewVerdictBody("uncertain", "none", 0.2)))
 	}))
 	defer server.Close()
 
