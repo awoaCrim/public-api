@@ -59,11 +59,11 @@ export interface ReviewAttempt {
   id: number
   task_id: number
   attempt_no: number
-  requested_at: number
+  request_at: number
   duration_ms: number
   http_status: number
   response: string
-  error: string
+  parse_error: string
   retryable: boolean
   created_at: number
 }
@@ -107,6 +107,9 @@ export interface ReviewTask {
   review_payload?: string
   evidence?: string[]
   raw_response?: string
+  skip_reason?: string
+  failure_reason?: string
+  retryable?: boolean
   schema_valid?: boolean
   schema_error?: string
   review_model?: string

@@ -48,19 +48,35 @@ func CreateLLMReviewTask(task *LLMReviewTask) error {
 // GetActiveLLMReviewTask returns the user's current active task, preferring
 // the grace-row slot and falling back to a status query for legacy rows.
 func GetActiveLLMReviewTask(userId int) (*LLMReviewTask, error) {
-	grace, err := GetLLMReviewGrace(userId)
-	if err == nil && grace != nil && grace.ActiveTaskId > 0 {
+	return getActiveLLMReviewTask(DB, userId, false)
+}
+
+func getActiveLLMReviewTask(db *gorm.DB, userId int, lock bool) (*LLMReviewTask, error) {
+	graceQuery := db.Where("user_id = ?", userId)
+	if lock {
+		graceQuery = lockForUpdate(graceQuery)
+	}
+	var grace LLMReviewGrace
+	if err := graceQuery.First(&grace).Error; err == nil && grace.ActiveTaskId > 0 {
+		taskQuery := db.Where("id = ? AND status IN ?", grace.ActiveTaskId, LLMReviewActiveStatuses)
+		if lock {
+			taskQuery = lockForUpdate(taskQuery)
+		}
 		var task LLMReviewTask
-		if err := DB.Where("id = ? AND status IN ?", grace.ActiveTaskId, LLMReviewActiveStatuses).
-			First(&task).Error; err == nil {
+		if err := taskQuery.First(&task).Error; err == nil {
 			return &task, nil
 		}
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	taskQuery := db.Where("user_id = ? AND status IN ?", userId, LLMReviewActiveStatuses).
+		Order("id desc")
+	if lock {
+		taskQuery = lockForUpdate(taskQuery)
 	}
 	var task LLMReviewTask
-	err = DB.Where("user_id = ? AND status IN ?", userId, LLMReviewActiveStatuses).
-		Order("id desc").
-		First(&task).Error
-	if err != nil {
+	if err := taskQuery.First(&task).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -88,8 +104,12 @@ func ClaimActiveReviewSlot(userId int, taskID int64) (bool, error) {
 	if _, err := GetOrCreateLLMReviewGrace(userId); err != nil {
 		return false, err
 	}
+	return claimActiveReviewSlot(DB, userId, taskID)
+}
+
+func claimActiveReviewSlot(db *gorm.DB, userId int, taskID int64) (bool, error) {
 	now := common.GetTimestamp()
-	result := DB.Model(&LLMReviewGrace{}).
+	result := db.Model(&LLMReviewGrace{}).
 		Where("user_id = ? AND active_task_id = 0", userId).
 		Updates(map[string]any{
 			"active_task_id": taskID,
@@ -372,10 +392,11 @@ func MarkLLMReviewTaskSkipped(task *LLMReviewTask, reason string) error {
 		_ = ReleaseActiveReviewSlot(task.UserId, task.ID)
 		return DB.Model(&LLMReviewTask{}).Where("id = ?", task.ID).
 			Updates(map[string]any{
-				"status":       LLMReviewTaskSkipped,
-				"skip_reason":  reason,
-				"completed_at": task.CompletedAt,
-				"updated_at":   task.UpdatedAt,
+				"status":         LLMReviewTaskSkipped,
+				"skip_reason":    reason,
+				"failure_reason": task.FailureReason,
+				"completed_at":   task.CompletedAt,
+				"updated_at":     task.UpdatedAt,
 			}).Error
 	}
 	if task.ReviewID == "" {
@@ -544,30 +565,147 @@ func GetLLMReviewQueueSummary() (LLMReviewQueueSummary, error) {
 	return summary, nil
 }
 
-// RetryLLMReviewTask re-queues a failed/uncertain task and atomically claims
-// the user slot. A concurrent active task for the same user is rejected.
-func RetryLLMReviewTask(id int64) error {
-	var task LLMReviewTask
-	if err := DB.Select("user_id", "status").Where("id = ?", id).First(&task).Error; err != nil {
+var (
+	ErrLLMReviewRetryNotAllowed = errors.New("only failed, uncertain, or recoverable skipped tasks can be retried")
+	ErrLLMReviewRetryDisabled   = errors.New("review service is disabled")
+)
+
+func isRecoverableLLMReviewSkipReason(reason string) bool {
+	return reason == SkipReasonReviewUnavailable || reason == SkipReasonReviewDisabled
+}
+
+// IsLLMReviewTaskRetryable reports whether the current configuration allows the
+// task to be submitted again. Recoverable skipped tasks are only retryable once
+// the review service is enabled and ready; terminal failed/uncertain tasks keep
+// the existing retry behavior.
+func IsLLMReviewTaskRetryable(task *LLMReviewTask) bool {
+	if task == nil {
+		return false
+	}
+	if task.Status == LLMReviewTaskFailed || task.Status == LLMReviewTaskUncertain {
+		return true
+	}
+	if task.Status != LLMReviewTaskSkipped || !isRecoverableLLMReviewSkipReason(task.SkipReason) {
+		return false
+	}
+	cfg := operation_setting.GetLLMReviewSetting()
+	return cfg.Enabled && operation_setting.GetReviewReadiness(cfg).Ready
+}
+
+func bindRetryActiveReviewSlot(tx *gorm.DB, userId int, taskID int64) error {
+	graceQuery := lockForUpdate(tx).Where("user_id = ?", userId)
+	var grace LLMReviewGrace
+	if err := graceQuery.First(&grace).Error; err != nil {
 		return err
 	}
-	if task.Status != LLMReviewTaskFailed && task.Status != LLMReviewTaskUncertain {
-		return errors.New("only failed or uncertain tasks can be retried")
+
+	if grace.ActiveTaskId > 0 && grace.ActiveTaskId != taskID {
+		var pointedTask LLMReviewTask
+		err := lockForUpdate(tx).Where("id = ?", grace.ActiveTaskId).First(&pointedTask).Error
+		if err == nil {
+			for _, activeStatus := range LLMReviewActiveStatuses {
+				if pointedTask.Status == LLMReviewTaskStatus(activeStatus) {
+					return errors.New("user already has an active review task")
+				}
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		result := tx.Model(&LLMReviewGrace{}).
+			Where("user_id = ? AND active_task_id = ?", userId, grace.ActiveTaskId).
+			Updates(map[string]any{
+				"active_task_id": 0,
+				"updated_at":     common.GetTimestamp(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("concurrent active task claimed the slot")
+		}
 	}
-	active, err := GetActiveLLMReviewTask(task.UserId)
-	if err != nil {
-		return err
-	}
-	if active != nil && active.ID != id {
-		return errors.New("user already has an active review task")
-	}
-	now := common.GetTimestamp()
-	err = DB.Model(&LLMReviewTask{}).
-		Where("id = ? AND status IN ?", id, []string{
-			string(LLMReviewTaskFailed),
-			string(LLMReviewTaskUncertain),
-		}).
+
+	result := tx.Model(&LLMReviewGrace{}).
+		Where("user_id = ? AND (active_task_id = 0 OR active_task_id = ?)", userId, taskID).
 		Updates(map[string]any{
+			"active_task_id": taskID,
+			"updated_at":     common.GetTimestamp(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("concurrent active task claimed the slot")
+	}
+	return nil
+}
+
+// RetryLLMReviewTask re-queues a failed/uncertain task or a recoverable skipped
+// task and atomically claims the user slot. Recoverable skipped tasks require
+// the current review configuration to be enabled and ready. The slot claim and
+// task state transition share one transaction, so a process crash cannot leave
+// an orphaned active slot pointing at a terminal task.
+func RetryLLMReviewTask(id int64) error {
+	var initialTask LLMReviewTask
+	if err := DB.Select("user_id", "status", "skip_reason").
+		Where("id = ?", id).First(&initialTask).Error; err != nil {
+		return err
+	}
+	if initialTask.UserId <= 0 {
+		return errors.New("invalid review task user id")
+	}
+	initialRetryable := initialTask.Status == LLMReviewTaskFailed ||
+		initialTask.Status == LLMReviewTaskUncertain ||
+		(initialTask.Status == LLMReviewTaskSkipped && isRecoverableLLMReviewSkipReason(initialTask.SkipReason))
+	if !initialRetryable {
+		return ErrLLMReviewRetryNotAllowed
+	}
+	if _, err := GetOrCreateLLMReviewGrace(initialTask.UserId); err != nil {
+		return err
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var task LLMReviewTask
+		if err := lockForUpdate(tx).
+			Select("user_id", "status", "skip_reason").
+			Where("id = ?", id).First(&task).Error; err != nil {
+			return err
+		}
+
+		retrySkipped := task.Status == LLMReviewTaskSkipped && isRecoverableLLMReviewSkipReason(task.SkipReason)
+		retryTerminal := task.Status == LLMReviewTaskFailed || task.Status == LLMReviewTaskUncertain
+		if !retrySkipped && !retryTerminal {
+			return ErrLLMReviewRetryNotAllowed
+		}
+		if retrySkipped {
+			cfg := operation_setting.GetLLMReviewSetting()
+			if !cfg.Enabled {
+				return ErrLLMReviewRetryDisabled
+			}
+			if readiness := operation_setting.GetReviewReadiness(cfg); !readiness.Ready {
+				return errors.New("review service is not ready: " + readiness.Reason)
+			}
+		}
+
+		active, err := getActiveLLMReviewTask(tx, task.UserId, true)
+		if err != nil {
+			return err
+		}
+		if active != nil && active.ID != id {
+			return errors.New("user already has an active review task")
+		}
+		if err := bindRetryActiveReviewSlot(tx, task.UserId, id); err != nil {
+			return err
+		}
+
+		cfg := operation_setting.GetLLMReviewSetting()
+		result := tx.Model(&LLMReviewTask{}).
+			Where("id = ? AND status = ?", id, task.Status)
+		if task.Status == LLMReviewTaskSkipped {
+			result = result.Where("skip_reason = ?", task.SkipReason)
+		}
+		result = result.Updates(map[string]any{
 			"status":          LLMReviewTaskPending,
 			"attempts":        0,
 			"next_retry_at":   0,
@@ -580,23 +718,29 @@ func RetryLLMReviewTask(id int64) error {
 			"reason":          "",
 			"evidence":        LLMReviewEvidence{},
 			"raw_response":    "",
+			"schema_error":    "",
 			"failure_reason":  "",
-			"updated_at":      now,
-		}).Error
-	if err != nil {
-		return err
-	}
-	claimed, err := ClaimActiveReviewSlot(task.UserId, id)
-	if err != nil {
-		return err
-	}
-	if !claimed {
-		// A concurrent task claimed the slot; roll back to the prior state.
-		_ = DB.Model(&LLMReviewTask{}).Where("id = ?", id).
-			Update("status", task.Status).Error
-		return errors.New("concurrent active task claimed the slot")
-	}
-	return nil
+			"reviewer_model":  "",
+			"output_mode":     operation_setting.EffectiveStructuredOutputMode(cfg),
+			"policy_id":       "",
+			"prompt_version":  "",
+			"schema_version":  "",
+			"schema_passed":   false,
+			"skip_reason":     "",
+			"banned":          false,
+			"ban_message":     "",
+			"ban_error":       "",
+			"superseded_by":   "",
+			"updated_at":      common.GetTimestamp(),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("review task changed before retry")
+		}
+		return nil
+	})
 }
 
 // ---------------------------------------------------------------------------

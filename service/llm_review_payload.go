@@ -248,6 +248,13 @@ func ParseRawLLMResponse(body []byte) (string, error) {
 }
 
 func NormalizeRawLLMResponse(body []byte) (ReviewContentNormalization, error) {
+	if normalized, isSSE, err := normalizeOpenAISSE(body); isSSE {
+		if err != nil {
+			return ReviewContentNormalization{}, err
+		}
+		return normalized, nil
+	}
+
 	var payload struct {
 		Choices []struct {
 			Message struct {
@@ -261,32 +268,120 @@ func NormalizeRawLLMResponse(body []byte) (ReviewContentNormalization, error) {
 	if len(payload.Choices) == 0 {
 		return ReviewContentNormalization{}, errors.New("no choices in response")
 	}
-	content := payload.Choices[0].Message.Content
-	var text string
+	text, err := llmContentToText(payload.Choices[0].Message.Content)
+	if err != nil {
+		return ReviewContentNormalization{}, err
+	}
+	return normalizeReviewJSONContent(text)
+}
+
+// normalizeOpenAISSE handles the explicit data-event form emitted by OpenAI
+// compatible streaming endpoints. It deliberately does not try to interpret
+// arbitrary text as an answer: a response is considered SSE only when it has
+// SSE field syntax, and every data event must contain JSON.
+func normalizeOpenAISSE(body []byte) (ReviewContentNormalization, bool, error) {
+	lines := strings.Split(strings.TrimPrefix(string(body), "\ufeff"), "\n")
+	seenSSEField := false
+	var content strings.Builder
+
+	for lineNumber, line := range lines {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			seenSSEField = true
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			seenSSEField = true
+			data := strings.TrimPrefix(line, "data:")
+			if strings.HasPrefix(data, " ") {
+				data = data[1:]
+			}
+			data = strings.TrimSpace(data)
+			if data == "" || data == "[DONE]" {
+				continue
+			}
+
+			var event struct {
+				Choices []struct {
+					Delta struct {
+						Content any `json:"content"`
+					} `json:"delta"`
+					Message struct {
+						Content any `json:"content"`
+					} `json:"message"`
+				} `json:"choices"`
+				Usage map[string]any `json:"usage"`
+			}
+			if err := common.Unmarshal([]byte(data), &event); err != nil {
+				return ReviewContentNormalization{}, true, errors.New("SSE data event " + strconv.Itoa(lineNumber+1) + " is invalid JSON: " + err.Error())
+			}
+			if len(event.Choices) == 0 {
+				if len(event.Usage) > 0 {
+					continue
+				}
+				return ReviewContentNormalization{}, true, errors.New("SSE data event has no choices")
+			}
+			choice := event.Choices[0]
+			chunk := choice.Delta.Content
+			if chunk == nil {
+				chunk = choice.Message.Content
+			}
+			if chunk == nil {
+				continue
+			}
+			text, err := llmContentToText(chunk)
+			if err != nil {
+				return ReviewContentNormalization{}, true, errors.New("SSE data event has invalid content: " + err.Error())
+			}
+			content.WriteString(text)
+			continue
+		}
+		if strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "id:") || strings.HasPrefix(line, "retry:") {
+			seenSSEField = true
+			continue
+		}
+		if seenSSEField {
+			return ReviewContentNormalization{}, true, errors.New("invalid SSE field")
+		}
+	}
+
+	if !seenSSEField {
+		return ReviewContentNormalization{}, false, nil
+	}
+	if strings.TrimSpace(content.String()) == "" {
+		return ReviewContentNormalization{}, true, errors.New("SSE response contains no content")
+	}
+	normalized, err := normalizeReviewJSONContent(content.String())
+	return normalized, true, err
+}
+
+func llmContentToText(content any) (string, error) {
 	switch value := content.(type) {
 	case string:
-		text = value
+		return value, nil
 	case []any:
 		if len(value) == 0 {
-			return ReviewContentNormalization{}, errors.New("empty content parts")
+			return "", errors.New("empty content parts")
 		}
 		var builder strings.Builder
 		for _, item := range value {
 			part, ok := item.(map[string]any)
 			if !ok || part["type"] != "text" {
-				return ReviewContentNormalization{}, errors.New("unsupported or ambiguous content part")
+				return "", errors.New("unsupported or ambiguous content part")
 			}
 			partText, ok := part["text"].(string)
 			if !ok || strings.TrimSpace(partText) == "" {
-				return ReviewContentNormalization{}, errors.New("empty text content part")
+				return "", errors.New("empty text content part")
 			}
 			builder.WriteString(partText)
 		}
-		text = builder.String()
+		return builder.String(), nil
 	default:
-		return ReviewContentNormalization{}, errors.New("unsupported content format")
+		return "", errors.New("unsupported content format")
 	}
-	return normalizeReviewJSONContent(text)
 }
 
 func normalizeReviewJSONContent(raw string) (ReviewContentNormalization, error) {

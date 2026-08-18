@@ -43,6 +43,7 @@ import {
   getReviewOutputModeLabel,
   getReviewStatusLabel,
   getReviewTriggerLabel,
+  isReviewTaskRetryable,
 } from '../lib/format'
 import type { ReviewTask } from '../types'
 
@@ -135,10 +136,10 @@ export function ReviewDetailDrawer(props: ReviewDetailDrawerProps) {
     return t('Unassigned')
   }, [detail, t])
 
-  const canRetry = useMemo(() => {
-    if (!detail) return false
-    return detail.status === 'failed' || detail.status === 'uncertain'
-  }, [detail])
+  const canRetry = useMemo(
+    () => (detail ? isReviewTaskRetryable(detail) : false),
+    [detail]
+  )
 
   const evidenceItems = useMemo(() => {
     const occurrences = new Map<string, number>()
@@ -336,6 +337,18 @@ export function ReviewDetailDrawer(props: ReviewDetailDrawerProps) {
                 </DetailSection>
               )}
 
+              {detail.skip_reason && (
+                <DetailSection label={t('Skip Reason')}>
+                  <span className='text-xs'>{detail.skip_reason}</span>
+                </DetailSection>
+              )}
+
+              {detail.failure_reason && (
+                <DetailSection label={t('Failure Reason')} danger>
+                  <span className='text-xs'>{detail.failure_reason}</span>
+                </DetailSection>
+              )}
+
               {detail.request_summary && (
                 <DetailSection label={t('Request Summary')}>
                   <pre className='max-h-48 overflow-auto text-xs break-all whitespace-pre-wrap'>
@@ -348,6 +361,14 @@ export function ReviewDetailDrawer(props: ReviewDetailDrawerProps) {
                 <DetailSection label={t('Review Payload')}>
                   <pre className='max-h-48 overflow-auto text-xs break-all whitespace-pre-wrap'>
                     {detail.review_payload}
+                  </pre>
+                </DetailSection>
+              )}
+
+              {detail.raw_response && (
+                <DetailSection label={t('Raw Response')}>
+                  <pre className='max-h-64 overflow-auto text-xs break-all whitespace-pre-wrap'>
+                    {detail.raw_response}
                   </pre>
                 </DetailSection>
               )}
@@ -371,17 +392,37 @@ export function ReviewDetailDrawer(props: ReviewDetailDrawerProps) {
 
               {detail.attempts && detail.attempts.length > 0 && (
                 <DetailSection label={t('Attempts')}>
-                  {detail.attempts.map((attempt) => (
-                    <div
-                      key={attempt.id}
-                      className='text-muted-foreground text-xs'
-                    >
-                      #{attempt.attempt_no}{' '}
-                      {formatReviewTime(attempt.requested_at)} ·{' '}
-                      {attempt.duration_ms}ms · HTTP {attempt.http_status}
-                      {attempt.error ? ` · ${attempt.error}` : ''}
-                    </div>
-                  ))}
+                  <div className='space-y-3'>
+                    {detail.attempts.map((attempt) => (
+                      <div key={attempt.id} className='space-y-1.5'>
+                        <div className='text-muted-foreground text-xs'>
+                          #{attempt.attempt_no}{' '}
+                          {formatReviewTime(attempt.request_at)} ·{' '}
+                          {attempt.duration_ms}ms · HTTP {attempt.http_status}
+                        </div>
+                        {attempt.response && (
+                          <div className='space-y-1'>
+                            <span className='text-xs font-semibold'>
+                              {t('Response')}
+                            </span>
+                            <pre className='bg-muted/30 max-h-48 overflow-auto rounded-md border p-2 text-xs break-all whitespace-pre-wrap'>
+                              {attempt.response}
+                            </pre>
+                          </div>
+                        )}
+                        {attempt.parse_error && (
+                          <div className='space-y-1'>
+                            <span className='text-xs font-semibold text-red-500'>
+                              {t('Parse Error')}
+                            </span>
+                            <pre className='max-h-32 overflow-auto rounded-md border border-red-200 bg-red-50 p-2 text-xs break-all whitespace-pre-wrap dark:border-red-900 dark:bg-red-950/20'>
+                              {attempt.parse_error}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </DetailSection>
               )}
 

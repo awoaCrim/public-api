@@ -210,6 +210,136 @@ func TestRetryLLMReviewTaskRules(t *testing.T) {
 	assert.Equal(t, failed.ID, grace.ActiveTaskId)
 }
 
+func TestRetryRecoverableSkippedLLMReviewTaskRequiresReadyConfiguration(t *testing.T) {
+	truncateTables(t)
+	cfg := reviewSettingForTest(t)
+	cfg.Enabled = false
+	cfg.BaseURL = "https://review.example.com"
+	cfg.ModelName = "reviewer"
+	cfg.PolicyText = "Do not share accounts."
+	cfg.StructuredOutputMode = operation_setting.StructuredOutputModeStrictSchema
+	cfg.SchemaTested = true
+	cfg.StructuredOutputTested = true
+
+	task := insertLLMReviewTask(t, &LLMReviewTask{UserId: 21})
+	require.NoError(t, MarkLLMReviewTaskSkipped(task, SkipReasonReviewDisabled))
+	err := RetryLLMReviewTask(task.ID)
+	require.ErrorIs(t, err, ErrLLMReviewRetryDisabled)
+
+	var stored LLMReviewTask
+	require.NoError(t, DB.First(&stored, task.ID).Error)
+	assert.Equal(t, LLMReviewTaskSkipped, stored.Status)
+	assert.Equal(t, SkipReasonReviewDisabled, stored.SkipReason)
+
+	cfg.Enabled = true
+	require.NoError(t, RetryLLMReviewTask(task.ID))
+	require.NoError(t, DB.First(&stored, task.ID).Error)
+	assert.Equal(t, LLMReviewTaskPending, stored.Status)
+	assert.Empty(t, stored.SkipReason)
+	assert.Empty(t, stored.FailureReason)
+	assert.Equal(t, operation_setting.StructuredOutputModeStrictSchema, stored.OutputMode)
+	grace, err := GetLLMReviewGrace(21)
+	require.NoError(t, err)
+	assert.Equal(t, task.ID, grace.ActiveTaskId)
+}
+
+func TestRetryReviewUnavailableClearsPreviousDiagnostics(t *testing.T) {
+	truncateTables(t)
+	cfg := reviewSettingForTest(t)
+	cfg.Enabled = true
+	cfg.BaseURL = "https://review.example.com"
+	cfg.ModelName = "reviewer"
+	cfg.PolicyText = "Do not share accounts."
+	cfg.StructuredOutputMode = operation_setting.StructuredOutputModeJSONObject
+	cfg.StructuredOutputTested = false
+
+	task := insertLLMReviewTask(t, &LLMReviewTask{
+		UserId:        22,
+		Status:        LLMReviewTaskSkipped,
+		SkipReason:    SkipReasonReviewUnavailable,
+		FailureReason: "policy text is required",
+		RawResponse:   "old response",
+		SchemaError:   "old schema error",
+		Verdict:       LLMReviewVerdictUncertain,
+		Category:      LLMReviewCategoryNone,
+		Confidence:    0.5,
+		Reason:        "old reason",
+		Evidence:      LLMReviewEvidence{"old evidence"},
+		Payload:       `{"request_snippet":"original"}`,
+		OutputMode:    operation_setting.StructuredOutputModeStrictSchema,
+	})
+	err := RetryLLMReviewTask(task.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "capability test")
+
+	cfg.StructuredOutputTested = true
+	require.NoError(t, RetryLLMReviewTask(task.ID))
+
+	var stored LLMReviewTask
+	require.NoError(t, DB.First(&stored, task.ID).Error)
+	assert.Equal(t, LLMReviewTaskPending, stored.Status)
+	assert.Empty(t, stored.SkipReason)
+	assert.Empty(t, stored.FailureReason)
+	assert.Empty(t, stored.RawResponse)
+	assert.Empty(t, stored.SchemaError)
+	assert.Empty(t, stored.Verdict)
+	assert.Empty(t, stored.Category)
+	assert.Zero(t, stored.Confidence)
+	assert.Empty(t, stored.Reason)
+	assert.Empty(t, stored.Evidence)
+	assert.Equal(t, `{"request_snippet":"original"}`, stored.Payload)
+	assert.Equal(t, operation_setting.StructuredOutputModeJSONObject, stored.OutputMode)
+}
+
+func TestRetrySkippedTaskPreservesReasonWhenSlotClaimLosesRace(t *testing.T) {
+	truncateTables(t)
+	cfg := reviewSettingForTest(t)
+	cfg.Enabled = true
+	cfg.BaseURL = "https://review.example.com"
+	cfg.ModelName = "reviewer"
+	cfg.PolicyText = "Do not share accounts."
+	cfg.StructuredOutputTested = true
+
+	task := insertLLMReviewTask(t, &LLMReviewTask{UserId: 23})
+	require.NoError(t, MarkLLMReviewTaskSkipped(task, SkipReasonReviewUnavailable))
+	other := insertLLMReviewTask(t, &LLMReviewTask{UserId: 23, Status: LLMReviewTaskPending})
+	require.NoError(t, DB.Model(&LLMReviewGrace{}).Where("user_id = ?", 23).
+		Update("active_task_id", other.ID).Error)
+
+	err := RetryLLMReviewTask(task.ID)
+	require.Error(t, err)
+
+	var stored LLMReviewTask
+	require.NoError(t, DB.First(&stored, task.ID).Error)
+	assert.Equal(t, LLMReviewTaskSkipped, stored.Status)
+	assert.Equal(t, SkipReasonReviewUnavailable, stored.SkipReason)
+}
+
+func TestRetryRecoversStaleReviewSlot(t *testing.T) {
+	truncateTables(t)
+	cfg := reviewSettingForTest(t)
+	cfg.Enabled = true
+	cfg.BaseURL = "https://review.example.com"
+	cfg.ModelName = "reviewer"
+	cfg.PolicyText = "Do not share accounts."
+	cfg.StructuredOutputTested = true
+
+	task := insertLLMReviewTask(t, &LLMReviewTask{UserId: 24})
+	require.NoError(t, MarkLLMReviewTaskSkipped(task, SkipReasonReviewUnavailable))
+	_, err := GetOrCreateLLMReviewGrace(24)
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&LLMReviewGrace{}).Where("user_id = ?", 24).
+		Update("active_task_id", int64(999999)).Error)
+
+	require.NoError(t, RetryLLMReviewTask(task.ID))
+	var stored LLMReviewTask
+	require.NoError(t, DB.First(&stored, task.ID).Error)
+	assert.Equal(t, LLMReviewTaskPending, stored.Status)
+	grace, err := GetLLMReviewGrace(24)
+	require.NoError(t, err)
+	assert.Equal(t, task.ID, grace.ActiveTaskId)
+}
+
 func TestCleanupLLMReviewOldRecordsKeepsViolationAndBanned(t *testing.T) {
 	truncateTables(t)
 	old := common.GetTimestamp() - 200*86400

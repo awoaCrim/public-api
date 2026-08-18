@@ -20,6 +20,7 @@ import type { TFunction } from 'i18next'
 
 import type {
   ReviewCategory,
+  ReviewTask,
   ReviewTaskStatus,
   ReviewTriggerType,
   StructuredOutputMode,
@@ -96,6 +97,19 @@ export function getReviewOutputModeLabel(
 ): string {
   if (!mode) return '-'
   return t(REVIEW_OUTPUT_MODE_LABEL_KEYS[mode] ?? mode)
+}
+
+/** Returns whether the current detail contract permits retrying a task. */
+export function isReviewTaskRetryable(
+  task: Pick<ReviewTask, 'status' | 'skip_reason' | 'retryable'>
+): boolean {
+  if (task.retryable != null) return task.retryable
+  if (task.status === 'failed' || task.status === 'uncertain') return true
+  return (
+    task.status === 'skipped' &&
+    (task.skip_reason === 'review_unavailable' ||
+      task.skip_reason === 'review_disabled')
+  )
 }
 
 /** Recent (24h) failure rate display percentage. */

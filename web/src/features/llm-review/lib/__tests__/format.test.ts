@@ -22,6 +22,7 @@ import { describe, test } from 'node:test'
 import {
   formatFailureRate,
   formatReviewTime,
+  isReviewTaskRetryable,
   formatWaitingSeconds,
   REVIEW_CATEGORY_LABEL_KEYS,
   REVIEW_OUTPUT_MODE_LABEL_KEYS,
@@ -47,6 +48,51 @@ describe('review format helpers', () => {
   test('renders missing timestamps as a dash', () => {
     assert.equal(formatReviewTime(0), '-')
     assert.notEqual(formatReviewTime(1700000000), '-')
+  })
+
+  test('allows retry only for recoverable skipped or terminal review tasks', () => {
+    assert.equal(
+      isReviewTaskRetryable({
+        status: 'skipped',
+        skip_reason: 'review_unavailable',
+      }),
+      true
+    )
+    assert.equal(
+      isReviewTaskRetryable({
+        status: 'skipped',
+        skip_reason: 'review_disabled',
+      }),
+      true
+    )
+    assert.equal(
+      isReviewTaskRetryable({
+        status: 'skipped',
+        skip_reason: 'grace_period',
+      }),
+      false
+    )
+    assert.equal(
+      isReviewTaskRetryable({
+        status: 'skipped',
+        skip_reason: 'skipped_disabled',
+      }),
+      false
+    )
+    assert.equal(
+      isReviewTaskRetryable({
+        status: 'failed',
+      }),
+      true
+    )
+    assert.equal(
+      isReviewTaskRetryable({
+        status: 'skipped',
+        skip_reason: 'review_unavailable',
+        retryable: false,
+      }),
+      false
+    )
   })
 
   test('keeps every status, trigger and category in the label maps', () => {

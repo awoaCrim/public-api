@@ -265,6 +265,56 @@ func TestProcessLLMReviewTaskRetriesThenFails(t *testing.T) {
 	assert.Equal(t, 3, calls, "each processing pass must make exactly one call before the budget is exhausted")
 }
 
+func TestRetrySkippedTaskCanReachWorker(t *testing.T) {
+	setupReviewTaskEnv(t)
+	_, cfg := newReviewWorkerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(reviewVerdictBody("compliant", "none", 0.9)))
+	})
+	cfg.PolicyText = "No sharing."
+
+	task := &model.LLMReviewTask{
+		UserId:     7,
+		Status:     model.LLMReviewTaskSkipped,
+		SkipReason: model.SkipReasonReviewDisabled,
+		Payload:    `{"request_snippet":"x"}`,
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, model.RetryLLMReviewTask(task.ID))
+
+	claimed, ok, err := model.ClaimLLMReviewTask(task.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	processLLMReviewTask(claimed)
+
+	var stored model.LLMReviewTask
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Equal(t, model.LLMReviewTaskCompliant, stored.Status)
+	assert.Contains(t, stored.Payload, "No sharing.")
+	assert.Empty(t, stored.SkipReason)
+}
+
+func TestProcessLLMReviewTaskRecordsRecoverableSkipReason(t *testing.T) {
+	setupReviewTaskEnv(t)
+	cfg := llmReviewSettingForTest(t)
+	cfg.Enabled = false
+	cfg.PolicyText = "No sharing."
+
+	task := &model.LLMReviewTask{
+		UserId:  7,
+		Status:  model.LLMReviewTaskReviewing,
+		Payload: `{"request_snippet":"x","policy_text":"No sharing."}`,
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	processLLMReviewTask(task)
+
+	var stored model.LLMReviewTask
+	require.NoError(t, model.DB.First(&stored, task.ID).Error)
+	assert.Equal(t, model.LLMReviewTaskSkipped, stored.Status)
+	assert.Equal(t, model.SkipReasonReviewDisabled, stored.SkipReason)
+	assert.Equal(t, "review service is disabled", stored.FailureReason)
+}
+
 func TestProcessLLMReviewTaskManualOverrideSupersedes(t *testing.T) {
 	setupReviewTaskEnv(t)
 	task := &model.LLMReviewTask{
