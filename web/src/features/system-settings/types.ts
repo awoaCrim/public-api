@@ -394,6 +394,11 @@ export type SecuritySettings = {
   'fetch_setting.allowed_ports': number[]
   'fetch_setting.apply_ip_filter_for_domain': boolean
   'token_setting.max_user_tokens': number
+  'rate_limit_ban_setting.enabled': boolean
+  'rate_limit_ban_setting.max_rpm': number
+  'rate_limit_ban_setting.max_input_tokens': number
+  'rate_limit_ban_setting.max_output_tokens': number
+  'rate_limit_ban_setting.whitelist_models': string[]
 }
 
 export type UpstreamChannel = {

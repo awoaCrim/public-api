@@ -42,6 +42,11 @@ const defaultSecuritySettings: SecuritySettings = {
   'fetch_setting.allowed_ports': [],
   'fetch_setting.apply_ip_filter_for_domain': false,
   'token_setting.max_user_tokens': 1000,
+  'rate_limit_ban_setting.enabled': false,
+  'rate_limit_ban_setting.max_rpm': 5,
+  'rate_limit_ban_setting.max_input_tokens': 200000,
+  'rate_limit_ban_setting.max_output_tokens': 10000,
+  'rate_limit_ban_setting.whitelist_models': [],
 }
 
 export function SecuritySettings() {
