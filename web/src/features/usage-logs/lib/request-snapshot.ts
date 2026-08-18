@@ -80,6 +80,20 @@ export function snapshotBytesToText(bytes: Uint8Array): string {
 }
 
 /**
+ * Formats valid JSON for the viewer without changing the original request
+ * text used by copy or download actions. Non-JSON content falls back to the
+ * decoded text unchanged.
+ */
+export function formatSnapshotTextForDisplay(text: string): string {
+  const textWithoutBom = text.replace(/^\uFEFF/, '')
+  try {
+    return JSON.stringify(JSON.parse(textWithoutBom), null, 2)
+  } catch {
+    return text
+  }
+}
+
+/**
  * Builds a downloadable file name from the request id. The raw request id may
  * contain characters unsafe for file names, so it is sanitized defensively.
  */

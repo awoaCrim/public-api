@@ -27,6 +27,7 @@ import { cn } from '@/lib/utils'
 
 import {
   decodeSnapshotContent,
+  formatSnapshotTextForDisplay,
   getRequestSnapshot,
   snapshotBytesToText,
   snapshotErrorKey,
@@ -130,11 +131,15 @@ export function RequestSnapshotSection(props: RequestSnapshotSectionProps) {
   const visiblePayload =
     payload?.request_id === props.requestId ? payload : null
 
+  const rawContentText = visiblePayload
+    ? snapshotBytesToText(decodeSnapshotContent(visiblePayload))
+    : ''
+  const displayContentText = formatSnapshotTextForDisplay(rawContentText)
+
   const handleCopy = useCallback(() => {
     if (!visiblePayload) return
-    const text = snapshotBytesToText(decodeSnapshotContent(visiblePayload))
-    void copyToClipboard(text)
-  }, [visiblePayload, copyToClipboard])
+    void copyToClipboard(rawContentText)
+  }, [visiblePayload, rawContentText, copyToClipboard])
 
   const handleDownload = useCallback(() => {
     if (!visiblePayload) return
@@ -151,10 +156,6 @@ export function RequestSnapshotSection(props: RequestSnapshotSectionProps) {
     anchor.remove()
     URL.revokeObjectURL(url)
   }, [visiblePayload])
-
-  const contentText = visiblePayload
-    ? snapshotBytesToText(decodeSnapshotContent(visiblePayload))
-    : ''
 
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
@@ -208,7 +209,7 @@ export function RequestSnapshotSection(props: RequestSnapshotSectionProps) {
               title={t('Copy to clipboard')}
               aria-label={t('Copy to clipboard')}
             >
-              {copiedText === contentText ? (
+              {copiedText === rawContentText ? (
                 <Check className='text-green-600' aria-hidden='true' />
               ) : (
                 <Copy aria-hidden='true' />
@@ -231,7 +232,7 @@ export function RequestSnapshotSection(props: RequestSnapshotSectionProps) {
               'font-mono'
             )}
           >
-            {contentText}
+            {displayContentText}
           </pre>
         </div>
       )}
