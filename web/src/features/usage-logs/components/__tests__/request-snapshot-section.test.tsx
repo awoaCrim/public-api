@@ -140,7 +140,7 @@ describe('request snapshot section', () => {
     domWindow.close()
   })
 
-  test('fetches directly on click and renders the exact body text', async () => {
+  test('fetches directly on click and renders formatted JSON', async () => {
     const rendered = harness({})
     await rendered.renderAt(true)
 
@@ -164,7 +164,7 @@ describe('request snapshot section', () => {
       '[data-request-snapshot-content="true"]'
     )
     assert.ok(content, 'captured body must be rendered')
-    assert.equal(content.textContent, '{"messages":[]}')
+    assert.equal(content.textContent, '{\n  "messages": []\n}')
 
     const actionLabels = new Set(
       [...rendered.container.querySelectorAll('button')].map((button) =>
@@ -175,6 +175,45 @@ describe('request snapshot section', () => {
     assert.ok(actionLabels.has('Download request body'))
 
     await unmount(rendered)
+  })
+
+  test('copies the original request text while displaying formatted JSON', async () => {
+    const copied: string[] = []
+    const originalClipboard = navigator.clipboard
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          copied.push(text)
+        },
+      },
+    })
+
+    try {
+      const rendered = harness({})
+      await rendered.renderAt(true)
+
+      await act(async () => {
+        ;(
+          rendered.container.querySelector('button') as HTMLButtonElement
+        ).click()
+      })
+      await act(async () => {
+        ;(
+          rendered.container.querySelector(
+            'button[aria-label="Copy to clipboard"]'
+          ) as HTMLButtonElement
+        ).click()
+      })
+
+      assert.deepEqual(copied, ['{"messages":[]}'])
+      await unmount(rendered)
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: originalClipboard,
+      })
+    }
   })
 
   test('clears all state when the parent dialog closes', async () => {

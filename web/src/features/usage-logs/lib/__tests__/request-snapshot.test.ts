@@ -22,6 +22,7 @@ import { describe, test } from 'node:test'
 import {
   canViewRequestSnapshot,
   decodeSnapshotContent,
+  formatSnapshotTextForDisplay,
   snapshotBytesToText,
   snapshotErrorKey,
   snapshotFileName,
@@ -96,6 +97,15 @@ describe('request snapshot payload decoding', () => {
     })
     const bytes = decodeSnapshotContent(payload)
     assert.equal(snapshotBytesToText(bytes), '{"model":"gpt-4o"}')
+  })
+
+  test('formats valid JSON for display and preserves non-JSON text', () => {
+    assert.equal(
+      formatSnapshotTextForDisplay('{"model":"gpt-4o","messages":[]}'),
+      '{\n  "model": "gpt-4o",\n  "messages": []\n}'
+    )
+    assert.equal(formatSnapshotTextForDisplay('not-json'), 'not-json')
+    assert.equal(formatSnapshotTextForDisplay(''), '')
   })
 
   test('preserves arbitrary binary bytes exactly', () => {
