@@ -1,0 +1,30 @@
+{
+  "id": "restore-admin-observability-ux",
+  "name": "restore-admin-observability-ux",
+  "title": "Restore admin observability UX",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zeta001",
+  "assignee": "zeta001",
+  "createdAt": "2026-08-14",
+  "completedAt": "2026-08-15",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-14-request-snapshot-root-direct",
+    "08-14-restore-usage-analysis-ui",
+    "08-14-expose-request-body-log-settings"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

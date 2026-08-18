@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-14-restore-admin-observability-ux/research.md","reason":"Current-state evidence, old/current UI comparison, and agreed product decisions."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Coordinate backend authorization, frontend visibility, and shared settings routing boundaries."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Backend security contract and regression-test conventions."}
+{"file":"web/AGENTS.md","reason":"Frontend component, accessibility, testing, typecheck, lint, and build requirements."}

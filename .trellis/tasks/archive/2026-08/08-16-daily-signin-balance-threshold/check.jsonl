@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review tests and implementation against project quality, validation, and quota safety requirements."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Check no schema change was introduced and all balance/config access remains database-compatible."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify threshold rejection and balance-read failure preserve stable localized API behavior."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify unexpected balance/config failures are logged safely without leaking database details."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review conversion and settings data flow across backend options, API, frontend labels, and locale contracts."}

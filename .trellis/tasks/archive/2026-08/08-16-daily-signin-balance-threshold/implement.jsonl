@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Apply project-specific backend test quality, quota safety, and cross-layer contract rules to the check-in threshold implementation."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Preserve SQLite, MySQL, and PostgreSQL compatibility and authoritative balance-read/update semantics."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Use sentinel errors and localized dashboard API responses without exposing balance/database failures."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace the display-currency threshold from admin input through options, backend conversion, quota comparison, and user-facing errors."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Reuse the existing currency conversion, option update, and check-in settings patterns instead of duplicating them."}

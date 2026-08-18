@@ -1,0 +1,3 @@
+{"file":".trellis/tasks/08-14-review-uncommitted-changes/review.md","reason":"Source finding F-010 and exact lint locations."}
+{"file":"web/AGENTS.md","reason":"Frontend lint, TypeScript, React key, and validation conventions."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Keep fixes mechanical and avoid unrelated refactoring."}

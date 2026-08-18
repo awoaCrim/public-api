@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-14-review-uncommitted-changes/review.md","reason":"Source findings F-001, F-004, F-005, and F-006 with evidence and impact."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Fail-closed migration, transaction, and cross-database requirements."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve sentinel errors and established API/relay denial contracts."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Regression-test and scope requirements."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Keep candidate-list and mutation authorization contracts consistent."}

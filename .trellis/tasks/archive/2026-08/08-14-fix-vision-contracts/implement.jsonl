@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-14-review-uncommitted-changes/review.md","reason":"Source findings F-003 and F-007."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve API envelopes and Vision fail-open error behavior."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"DTO presence, tests, and RelayKit verification requirements."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace UI to API to user-setting persistence and request cancellation."}

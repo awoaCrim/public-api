@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-14-restore-admin-observability-ux/prd.md","reason":"Verify all three user-approved deliverables and cross-child acceptance criteria."}
+{"file":".trellis/tasks/08-14-restore-admin-observability-ux/design.md","reason":"Verify integration boundaries and non-goals."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check security-focused backend tests and scoped implementation."}
+{"file":"web/AGENTS.md","reason":"Check frontend behavior tests, i18n, accessibility, lint, typecheck, and build."}

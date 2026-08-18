@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-14-restore-admin-observability-ux/research.md","reason":"Documents the current permission/proof chain and Root-only decision."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Security-contract and meaningful regression-test conventions."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Preserve sensitive-data handling and durable access auditing."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Keep backend authorization and frontend visibility contracts aligned."}
+{"file":"web/AGENTS.md","reason":"Frontend security, component, test, lint, and typecheck rules."}

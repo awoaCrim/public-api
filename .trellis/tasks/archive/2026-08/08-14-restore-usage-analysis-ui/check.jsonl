@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-14-restore-usage-analysis-ui/prd.md","reason":"Verify the complete restored visual hierarchy and preserved safe behavior."}
+{"file":".trellis/tasks/08-14-restore-usage-analysis-ui/design.md","reason":"Check that current API summary/pagination semantics remain authoritative."}
+{"file":"web/AGENTS.md","reason":"Check UI behavior tests, responsive/accessibility rules, lint, typecheck, and build."}
+{"file":".agents/skills/i18n-translate/SKILL.md","reason":"Verify locale writes used the sanctioned script and all locales remain synchronized."}

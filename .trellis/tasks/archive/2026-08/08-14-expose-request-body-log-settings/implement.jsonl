@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-14-restore-admin-observability-ux/research.md","reason":"Documents why the existing form appears missing and the agreed dedicated-entry decision."}
+{"file":"web/AGENTS.md","reason":"Frontend routing, component reuse, testing, i18n, lint, typecheck, and build conventions."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Keep one settings form/state owner and avoid duplicated management UI."}
+{"file":".agents/skills/shadcn-ui/SKILL.md","reason":"Project-aware settings/sidebar composition guidance."}

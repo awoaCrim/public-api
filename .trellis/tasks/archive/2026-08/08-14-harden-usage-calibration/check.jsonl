@@ -1,0 +1,3 @@
+{"file":".trellis/tasks/08-14-harden-usage-calibration/prd.md","reason":"Verify billing and calibration boundary outcomes."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check no negative charge path and bounded inputs."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Check safe bounded persistence."}

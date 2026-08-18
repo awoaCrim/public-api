@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec index and pre-development checklist for the options endpoint change."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Controller/model test ownership and API layer boundaries."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Cross-database query compatibility for the Root-user options lookup."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Safe dashboard API error behavior for options resolution."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Regression-test and cross-layer quality expectations."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review options response, frontend initialization, and first-query contract."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Prefer existing root-role lookup/filter helpers over duplicated identity logic."}
+{"file":".trellis/tasks/08-16-usage-analysis-root-default/research/repo-audit.md","reason":"Repository evidence for current all-user default and canonical Root identity."}

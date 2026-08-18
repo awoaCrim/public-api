@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend guideline index and quality-check pointers for final review."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify findings against project testing, billing safety, scope, and RelayKit conventions."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Verify migration, locking, dialect, transaction, and persistence findings."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Verify safe API errors, relay protocol errors, sentinel wrapping, and boundary behavior."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify audit, privacy, request correlation, and operational logging findings."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check cross-layer data-flow and contract consistency."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check duplicated patterns, helper reuse, and constant/config consistency."}
