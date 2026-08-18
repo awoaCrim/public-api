@@ -48,3 +48,25 @@ Committed and pushed the Root-only request snapshot viewer, dedicated Request Sn
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Complete Root-scoped usage analysis
+
+**Date**: 2026-08-18
+**Task**: Complete Root-scoped usage analysis
+**Branch**: `main`
+
+### Summary
+
+Completed the Root-scoped usage-analysis flow: options expose the canonical enabled Root user, the frontend waits for options before issuing the first analysis query, initializes Root once, shows a visible fallback when Root metadata is unavailable, and preserves manual user/filter changes. Added a component regression test for manual user selection and fixed its polling helper. Focused Go/frontend tests, typecheck, lint/format, build, and diff checks passed. Unrelated Vision and LLM Review working-tree changes were left untouched.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31515293` | (see git log) |
+| `7b404c06` | (see git log) |
+
+### Status
+
+[OK] **Completed**
