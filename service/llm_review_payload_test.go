@@ -89,6 +89,39 @@ func TestValidateLLMReviewVerdictCompatibilityConfidenceStringValidation(t *test
 	}
 }
 
+func TestValidateLLMReviewVerdictCompatibilityEvidenceString(t *testing.T) {
+	data := []byte(`{"verdict":"violation","category":"limit_bypass","confidence":"0.92","reason":"r","evidence":"single evidence"}`)
+
+	verdict, compatibilityPassed, compatibilityErr := ValidateLLMReviewVerdict(data)
+	require.True(t, compatibilityPassed, compatibilityErr)
+	require.NotNil(t, verdict)
+	assert.Equal(t, []string{"single evidence"}, verdict.Evidence)
+
+	_, strictPassed, strictErr := ValidateStrictLLMReviewVerdict(data)
+	assert.False(t, strictPassed)
+	assert.Contains(t, strictErr, "invalid verdict fields")
+}
+
+func TestValidateLLMReviewVerdictCompatibilityEvidenceStringValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		ok   bool
+	}{
+		{name: "empty", data: `{"verdict":"violation","category":"limit_bypass","confidence":0.92,"reason":"r","evidence":""` + `}`, ok: false},
+		{name: "whitespace", data: `{"verdict":"violation","category":"limit_bypass","confidence":0.92,"reason":"r","evidence":"   "}`, ok: false},
+		{name: "null", data: `{"verdict":"violation","category":"limit_bypass","confidence":0.92,"reason":"r","evidence":null}`, ok: false},
+		{name: "number", data: `{"verdict":"violation","category":"limit_bypass","confidence":0.92,"reason":"r","evidence":1}`, ok: false},
+		{name: "object", data: `{"verdict":"violation","category":"limit_bypass","confidence":0.92,"reason":"r","evidence":{"text":"e"}}`, ok: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, passed, errMsg := ValidateLLMReviewVerdict([]byte(tc.data))
+			assert.Equal(t, tc.ok, passed, errMsg)
+		})
+	}
+}
+
 func TestValidateLLMReviewVerdictCompatibilityNormalizesUncertainCategory(t *testing.T) {
 	data := []byte(`{"verdict":"uncertain","category":"uncertain","confidence":0.2,"reason":"insufficient evidence","evidence":["probe"]}`)
 

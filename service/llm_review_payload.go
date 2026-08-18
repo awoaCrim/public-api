@@ -59,19 +59,34 @@ func validateLLMReviewVerdict(data []byte, rejectUnknownFields bool) (*ReviewVer
 				return nil, false, "unknown field: " + field
 			}
 		}
-	} else if confidence, ok := fields["confidence"].(string); ok {
-		parsedConfidence, err := parseCompatibilityConfidence(confidence)
-		if err != nil {
-			return nil, false, "invalid verdict fields: " + err.Error()
+	} else {
+		normalized := false
+		if confidence, ok := fields["confidence"].(string); ok {
+			parsedConfidence, err := parseCompatibilityConfidence(confidence)
+			if err != nil {
+				return nil, false, "invalid verdict fields: " + err.Error()
+			}
+			fields["confidence"] = parsedConfidence
+			normalized = true
 		}
-		// Re-encode through the project JSON helpers so the normal typed decode
-		// remains the single source of truth for the rest of the verdict.
-		fields["confidence"] = parsedConfidence
-		normalizedData, err := common.Marshal(fields)
-		if err != nil {
-			return nil, false, "invalid verdict fields: " + err.Error()
+		if evidence, ok := fields["evidence"].(string); ok {
+			if strings.TrimSpace(evidence) == "" {
+				return nil, false, "invalid verdict fields: evidence must be a non-empty string"
+			}
+			// A single evidence sentence is unambiguous in compatibility mode;
+			// preserve its original text as one audit evidence item.
+			fields["evidence"] = []string{evidence}
+			normalized = true
 		}
-		data = normalizedData
+		if normalized {
+			// Re-encode through the project JSON helpers so the normal typed decode
+			// remains the single source of truth for the rest of the verdict.
+			normalizedData, err := common.Marshal(fields)
+			if err != nil {
+				return nil, false, "invalid verdict fields: " + err.Error()
+			}
+			data = normalizedData
+		}
 	}
 	if fields["confidence"] == nil {
 		return nil, false, "invalid verdict fields: confidence must be a number"
