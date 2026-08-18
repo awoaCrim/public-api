@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Use repository backend scope, observable-contract testing, gofmt, and focused/full verification rules while removing proof gates and adding route regressions."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Preserve existing dashboard response/status contracts and distinguish auth/session/WebAuthn errors from the removed secondary proof gate."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace the backend/frontend proof-flow contract and the runtime /data mount to HTTP asset response across layers."}
+{"file":"web/AGENTS.md","reason":"Apply frontend i18n, component, API, test, typecheck, lint, and build conventions to the forced-flow removal."}

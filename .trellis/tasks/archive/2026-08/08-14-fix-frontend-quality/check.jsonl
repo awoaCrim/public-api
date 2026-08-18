@@ -1,0 +1,2 @@
+{"file":".trellis/tasks/08-14-fix-frontend-quality/prd.md","reason":"Verify targeted quality acceptance criteria."}
+{"file":"web/AGENTS.md","reason":"Check frontend lint, formatting, typecheck, build, and test expectations."}

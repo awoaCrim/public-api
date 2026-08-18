@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review test quality, scope discipline, and required backend verification for the security and static-route changes."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check that 404 asset errors and dashboard auth/session/WebAuthn failures preserve project response contracts."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify channel-key/Passkey/LLM audit behavior and ensure no sensitive data is exposed by new route handling."}
+{"file":"web/AGENTS.md","reason":"Review affected frontend behavior for i18n, accessibility, test conventions, typecheck, lint, and build compliance."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit the end-to-end proof-free UI/API behavior and data-volume asset serving contract."}

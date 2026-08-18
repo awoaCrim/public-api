@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/08-14-restore-admin-observability-ux/research.md","reason":"Documents the exact old/current presentation comparison and safe data boundary."}
+{"file":"web/AGENTS.md","reason":"React, component size, responsive styling, accessibility, testing, lint, typecheck, and build conventions."}
+{"file":".agents/skills/shadcn-ui/SKILL.md","reason":"Project-aware UI composition and existing component usage guidance."}
+{"file":".agents/skills/vercel-react-best-practices/SKILL.md","reason":"Avoid unnecessary re-renders and preserve efficient client query/render behavior."}
+{"file":".agents/skills/i18n-translate/SKILL.md","reason":"Mandatory seven-locale script-only translation workflow."}

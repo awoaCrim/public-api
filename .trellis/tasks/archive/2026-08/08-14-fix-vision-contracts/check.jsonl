@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-14-fix-vision-contracts/prd.md","reason":"Verify settings preservation and cancellation acceptance criteria."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check stable dashboard and relay error behavior."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check focused backend/frontend tests and independent RelayKit build."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check the full settings write and outbound request context flows."}

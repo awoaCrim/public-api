@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-14-review-uncommitted-changes/review.md","reason":"Source findings F-008 and F-009."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Billing/token bounds, saturation, and regression test requirements."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Calibration persistence must remain cross-database safe."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Trace upstream usage through normalization, billing, logs, and calibration."}

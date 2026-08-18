@@ -1,0 +1,31 @@
+{
+  "id": "remediate-review-findings",
+  "name": "remediate-review-findings",
+  "title": "Remediate review findings",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "zeta001",
+  "assignee": "zeta001",
+  "createdAt": "2026-08-14",
+  "completedAt": "2026-08-14",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-14-fix-routing-access-migration",
+    "08-14-fix-vision-contracts",
+    "08-14-harden-usage-calibration",
+    "08-14-fix-frontend-quality"
+  ],
+  "parent": "08-14-review-uncommitted-changes",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

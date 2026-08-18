@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/08-14-fix-routing-access-migration/prd.md","reason":"Verify all four corrected observable behaviors."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Check migration failure propagation and no-write behavior."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Check fixed-token denial preserves stable error behavior."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check focused tests and cross-database safety."}

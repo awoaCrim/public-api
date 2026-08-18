@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend guideline index and quality-check pointers for the review."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Backend review standards, test contracts, quota safety, and RelayKit verification requirements."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Cross-database, migration, locking, JSON persistence, and transaction review rules."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"API, relay, middleware, sentinel-error, and safe-error response contracts."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Operational logging, durable audit logs, privacy boundaries, and SQL logging rules."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Cross-layer review checklist for storage, service, API, and UI contracts."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review checklist for repeated patterns, constants, helpers, and consistency risks."}
