@@ -286,20 +286,22 @@ const (
 
 // OAuth related messages
 const (
-	MsgOAuthInvalidCode     = "oauth.invalid_code"
-	MsgOAuthGetUserErr      = "oauth.get_user_error"
-	MsgOAuthAccountUsed     = "oauth.account_used"
-	MsgOAuthUnknownProvider = "oauth.unknown_provider"
-	MsgOAuthStateInvalid    = "oauth.state_invalid"
-	MsgOAuthNotEnabled      = "oauth.not_enabled"
-	MsgOAuthUserDeleted     = "oauth.user_deleted"
-	MsgOAuthUserBanned      = "oauth.user_banned"
-	MsgOAuthBindSuccess     = "oauth.bind_success"
-	MsgOAuthAlreadyBound    = "oauth.already_bound"
-	MsgOAuthConnectFailed   = "oauth.connect_failed"
-	MsgOAuthTokenFailed     = "oauth.token_failed"
-	MsgOAuthUserInfoEmpty   = "oauth.user_info_empty"
-	MsgOAuthTrustLevelLow   = "oauth.trust_level_low"
+	MsgOAuthInvalidCode                 = "oauth.invalid_code"
+	MsgOAuthGetUserErr                  = "oauth.get_user_error"
+	MsgOAuthAccountUsed                 = "oauth.account_used"
+	MsgOAuthUnknownProvider             = "oauth.unknown_provider"
+	MsgOAuthStateInvalid                = "oauth.state_invalid"
+	MsgOAuthNotEnabled                  = "oauth.not_enabled"
+	MsgOAuthUserDeleted                 = "oauth.user_deleted"
+	MsgOAuthUserBanned                  = "oauth.user_banned"
+	MsgOAuthBindSuccess                 = "oauth.bind_success"
+	MsgOAuthAlreadyBound                = "oauth.already_bound"
+	MsgOAuthConnectFailed               = "oauth.connect_failed"
+	MsgOAuthTokenFailed                 = "oauth.token_failed"
+	MsgOAuthUserInfoEmpty               = "oauth.user_info_empty"
+	MsgOAuthTrustLevelLow               = "oauth.trust_level_low"
+	MsgOAuthGitHubAccountTooNew         = "oauth.github_account_too_new"
+	MsgOAuthGitHubAccountAgeUnavailable = "oauth.github_account_age_unavailable"
 )
 
 // Model layer error messages (for translation in controller)

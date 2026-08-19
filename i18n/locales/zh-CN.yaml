@@ -255,6 +255,8 @@ oauth.connect_failed: "无法连接至 {{.Provider}} 服务器，请稍后重试
 oauth.token_failed: "{{.Provider}} 获取 Token 失败，请检查设置"
 oauth.user_info_empty: "{{.Provider}} 获取用户信息为空，请检查设置"
 oauth.trust_level_low: "Linux DO 信任等级未达到管理员设置的最低信任等级"
+oauth.github_account_too_new: "您的 GitHub 账号注册时间必须满 {{.Years}} 个日历年才能注册"
+oauth.github_account_age_unavailable: "无法验证 GitHub 账号注册时间，请稍后重试"
 
 # Model layer error messages
 redeem.failed: "兑换失败，请稍后重试"

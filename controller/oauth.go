@@ -195,20 +195,7 @@ func HandleOAuth(c *gin.Context) {
 	}
 	user, err := findOrCreateOAuthUser(c, provider, oauthUser, payload.AffiliateCode)
 	if err != nil {
-		if errors.Is(err, model.ErrEmailAlreadyTaken) {
-			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
-			return
-		}
-		switch err.(type) {
-		case *OAuthUserDeletedError:
-			common.ApiErrorI18n(c, i18n.MsgOAuthUserDeleted)
-		case *OAuthRegistrationDisabledError:
-			common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
-		case *OAuthEmailAlreadyTakenError:
-			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
-		default:
-			common.ApiError(c, err)
-		}
+		handleOAuthUserResolutionError(c, err)
 		return
 	}
 
@@ -330,6 +317,15 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		return nil, &OAuthRegistrationDisabledError{}
 	}
 
+	// The GitHub age policy applies only to creating a new local user. Existing
+	// numeric/legacy matches returned above, and authenticated bind flows never
+	// call this function, so login and binding remain unaffected.
+	if _, isGitHub := provider.(*oauth.GitHubProvider); isGitHub {
+		if err := checkGitHubRegistrationAge(time.Now(), oauthUser.CreatedAt, common.GitHubOAuthMinimumAgeYears); err != nil {
+			return nil, err
+		}
+	}
+
 	// Set up new user
 	user.Username = provider.GetProviderPrefix() + strconv.Itoa(model.GetMaxUserId()+1)
 
@@ -428,6 +424,27 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	return user, nil
 }
 
+func handleOAuthUserResolutionError(c *gin.Context, err error) {
+	if errors.Is(err, model.ErrEmailAlreadyTaken) {
+		common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
+		return
+	}
+	switch e := err.(type) {
+	case *OAuthUserDeletedError:
+		common.ApiErrorI18n(c, i18n.MsgOAuthUserDeleted)
+	case *OAuthRegistrationDisabledError:
+		common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
+	case *OAuthEmailAlreadyTakenError:
+		common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
+	case *OAuthGitHubAccountTooNewError:
+		common.ApiErrorI18n(c, i18n.MsgOAuthGitHubAccountTooNew, map[string]any{"Years": e.MinimumAgeYears})
+	case *OAuthGitHubAccountAgeUnavailableError:
+		common.ApiErrorI18n(c, i18n.MsgOAuthGitHubAccountAgeUnavailable)
+	default:
+		common.ApiError(c, err)
+	}
+}
+
 // Error types for OAuth
 type OAuthUserDeletedError struct{}
 
@@ -445,6 +462,34 @@ type OAuthEmailAlreadyTakenError struct{}
 
 func (e *OAuthEmailAlreadyTakenError) Error() string {
 	return "email is already in use"
+}
+
+type OAuthGitHubAccountTooNewError struct {
+	MinimumAgeYears int
+}
+
+func (e *OAuthGitHubAccountTooNewError) Error() string {
+	return fmt.Sprintf("GitHub account must be at least %d calendar years old", e.MinimumAgeYears)
+}
+
+type OAuthGitHubAccountAgeUnavailableError struct{}
+
+func (e *OAuthGitHubAccountAgeUnavailableError) Error() string {
+	return "unable to verify GitHub account age"
+}
+
+func checkGitHubRegistrationAge(now time.Time, createdAt *time.Time, minimumAgeYears int) error {
+	if minimumAgeYears == 0 {
+		return nil
+	}
+	if minimumAgeYears < 0 || minimumAgeYears > common.MaxGitHubOAuthMinimumAgeYears || createdAt == nil {
+		return &OAuthGitHubAccountAgeUnavailableError{}
+	}
+	cutoff := now.AddDate(-minimumAgeYears, 0, 0)
+	if createdAt.After(cutoff) {
+		return &OAuthGitHubAccountTooNewError{MinimumAgeYears: minimumAgeYears}
+	}
+	return nil
 }
 
 // handleOAuthError handles OAuth errors and returns translated message

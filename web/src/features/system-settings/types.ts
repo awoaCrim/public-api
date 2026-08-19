@@ -130,6 +130,7 @@ export type AuthSettings = {
   EmailDomainWhitelist: string
   ServerAddress: string
   GitHubOAuthEnabled: boolean
+  GitHubOAuthMinimumAgeYears: number
   GitHubClientId: string
   GitHubClientSecret: string
   'discord.enabled': boolean

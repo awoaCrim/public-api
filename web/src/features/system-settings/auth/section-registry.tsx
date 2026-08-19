@@ -50,6 +50,7 @@ const AUTH_SECTIONS = [
         serverAddress={settings.ServerAddress}
         defaultValues={{
           GitHubOAuthEnabled: settings.GitHubOAuthEnabled,
+          GitHubOAuthMinimumAgeYears: settings.GitHubOAuthMinimumAgeYears,
           GitHubClientId: settings.GitHubClientId,
           GitHubClientSecret: settings.GitHubClientSecret,
           'discord.enabled': settings['discord.enabled'],

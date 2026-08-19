@@ -21,8 +21,11 @@ func init() {
 	Register("github", &GitHubProvider{})
 }
 
-// GitHubProvider implements OAuth for GitHub
-type GitHubProvider struct{}
+// GitHubProvider implements OAuth for GitHub.
+type GitHubProvider struct {
+	userInfoURL string
+	httpClient  *http.Client
+}
 
 type gitHubOAuthResponse struct {
 	AccessToken string `json:"access_token"`
@@ -31,10 +34,28 @@ type gitHubOAuthResponse struct {
 }
 
 type gitHubUser struct {
-	Id    int64  `json:"id"`    // GitHub numeric ID (permanent, never changes)
-	Login string `json:"login"` // GitHub username (can be changed by user)
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	Id        int64           `json:"id"`    // GitHub numeric ID (permanent, never changes)
+	Login     string          `json:"login"` // GitHub username (can be changed by user)
+	Name      string          `json:"name"`
+	Email     string          `json:"email"`
+	CreatedAt json.RawMessage `json:"created_at"` // Optional GitHub account creation timestamp
+}
+
+func parseGitHubCreatedAt(raw json.RawMessage) *time.Time {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+
+	var value string
+	if err := common.Unmarshal(raw, &value); err != nil || value == "" {
+		return nil
+	}
+	createdAt, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return nil
+	}
+	return &createdAt
 }
 
 func (p *GitHubProvider) GetName() string {
@@ -57,7 +78,7 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 		"client_secret": common.GitHubClientSecret,
 		"code":          code,
 	}
-	jsonData, err := json.Marshal(values)
+	jsonData, err := common.Marshal(values)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +103,7 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 	logger.LogDebug(ctx, "[OAuth-GitHub] ExchangeToken response status: %d", res.StatusCode)
 
 	var oAuthResponse gitHubOAuthResponse
-	err = json.NewDecoder(res.Body).Decode(&oAuthResponse)
+	err = common.DecodeJson(res.Body, &oAuthResponse)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] ExchangeToken decode error: %s", err.Error()))
 		return nil, err
@@ -105,14 +126,19 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*OAuthUser, error) {
 	logger.LogDebug(ctx, "[OAuth-GitHub] GetUserInfo: fetching user info")
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
+	userInfoURL := p.userInfoURL
+	if userInfoURL == "" {
+		userInfoURL = "https://api.github.com/user"
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", userInfoURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token.AccessToken))
 
-	client := http.Client{
-		Timeout: 20 * time.Second,
+	client := p.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
 	}
 	res, err := client.Do(req)
 	if err != nil {
@@ -135,7 +161,7 @@ func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*O
 	}
 
 	var githubUser gitHubUser
-	err = json.NewDecoder(res.Body).Decode(&githubUser)
+	err = common.DecodeJson(res.Body, &githubUser)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] GetUserInfo decode error: %s", err.Error()))
 		return nil, err
@@ -146,6 +172,11 @@ func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*O
 		return nil, NewOAuthError(i18n.MsgOAuthUserInfoEmpty, map[string]any{"Provider": "GitHub"})
 	}
 
+	createdAt := parseGitHubCreatedAt(githubUser.CreatedAt)
+	rawCreatedAt := bytes.TrimSpace(githubUser.CreatedAt)
+	if len(rawCreatedAt) > 0 && !bytes.Equal(rawCreatedAt, []byte("null")) && createdAt == nil {
+		logger.LogWarn(ctx, "[OAuth-GitHub] invalid optional created_at metadata")
+	}
 	logger.LogDebug(ctx, "[OAuth-GitHub] GetUserInfo success: id=%d, login=%s, name=%s, email=%s",
 		githubUser.Id, githubUser.Login, githubUser.Name, githubUser.Email)
 
@@ -154,6 +185,7 @@ func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*O
 		Username:       githubUser.Login,
 		DisplayName:    githubUser.Name,
 		Email:          githubUser.Email,
+		CreatedAt:      createdAt,
 		Extra: map[string]any{
 			"legacy_id": githubUser.Login, // Store login for migration from old accounts
 		},

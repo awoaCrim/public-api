@@ -57,6 +57,10 @@ func AllOption() ([]*Option, error) {
 }
 
 func InitOptionMap() {
+	// Reinitialize this runtime option before publishing the default map. This
+	// keeps repeated startup/test initialization from carrying over a previous
+	// in-memory override when no persisted value exists.
+	common.GitHubOAuthMinimumAgeYears = common.DefaultGitHubOAuthMinimumAgeYears
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap = make(map[string]string)
 
@@ -69,6 +73,7 @@ func InitOptionMap() {
 	common.OptionMap["PasswordRegisterEnabled"] = strconv.FormatBool(common.PasswordRegisterEnabled)
 	common.OptionMap["EmailVerificationEnabled"] = strconv.FormatBool(common.EmailVerificationEnabled)
 	common.OptionMap["GitHubOAuthEnabled"] = strconv.FormatBool(common.GitHubOAuthEnabled)
+	common.OptionMap[common.GitHubOAuthMinimumAgeYearsOptionKey] = strconv.Itoa(common.GitHubOAuthMinimumAgeYears)
 	common.OptionMap["LinuxDOOAuthEnabled"] = strconv.FormatBool(common.LinuxDOOAuthEnabled)
 	common.OptionMap["TelegramOAuthEnabled"] = strconv.FormatBool(common.TelegramOAuthEnabled)
 	common.OptionMap["WeChatAuthEnabled"] = strconv.FormatBool(common.WeChatAuthEnabled)
@@ -245,6 +250,10 @@ func validateOptionValue(key string, value string) error {
 		_, err := operation_setting.ParseCheckinBalanceThreshold(value)
 		return err
 	}
+	if key == common.GitHubOAuthMinimumAgeYearsOptionKey {
+		_, err := common.ParseGitHubOAuthMinimumAgeYears(value)
+		return err
+	}
 	return nil
 }
 
@@ -329,6 +338,20 @@ func updateOptionMap(key string, value string) (err error) {
 			common.OptionMapRWMutex.Unlock()
 			return err
 		}
+	}
+	if key == common.GitHubOAuthMinimumAgeYearsOptionKey {
+		years, err := common.ParseGitHubOAuthMinimumAgeYears(value)
+		if err != nil {
+			common.OptionMapRWMutex.Lock()
+			if common.OptionMap == nil {
+				common.OptionMap = make(map[string]string)
+			}
+			common.OptionMap[key] = strconv.Itoa(common.DefaultGitHubOAuthMinimumAgeYears)
+			common.OptionMapRWMutex.Unlock()
+			common.GitHubOAuthMinimumAgeYears = common.DefaultGitHubOAuthMinimumAgeYears
+			return err
+		}
+		common.GitHubOAuthMinimumAgeYears = years
 	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()

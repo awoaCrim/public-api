@@ -34,6 +34,7 @@ const defaultAuthSettings: AuthSettings = {
   EmailDomainWhitelist: '',
   ServerAddress: '',
   GitHubOAuthEnabled: false,
+  GitHubOAuthMinimumAgeYears: 1,
   GitHubClientId: '',
   GitHubClientSecret: '',
   'discord.enabled': false,

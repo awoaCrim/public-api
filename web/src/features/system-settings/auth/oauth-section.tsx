@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import axios from 'axios'
+import type { TFunction } from 'i18next'
 import { ExternalLink } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
@@ -50,6 +51,11 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { safeNumberFieldProps } from '../utils/numeric-field'
+import {
+  MAX_GITHUB_OAUTH_MINIMUM_AGE_YEARS,
+  normalizeGitHubOAuthMinimumAgeYears,
+} from './github-oauth-age'
 import {
   buildOAuthCallbackUrl,
   resolveOAuthSiteUrl,
@@ -61,42 +67,52 @@ import {
  * `discord.*` and `oidc.*` fields are modeled as nested objects here and
  * flattened back to dotted server keys only when persisting.
  */
-const oauthSchema = z.object({
-  GitHubOAuthEnabled: z.boolean(),
-  GitHubClientId: z.string(),
-  GitHubClientSecret: z.string(),
-  discord: z.object({
-    enabled: z.boolean(),
-    client_id: z.string(),
-    client_secret: z.string(),
-  }),
-  oidc: z.object({
-    enabled: z.boolean(),
-    display_name: z.string(),
-    client_id: z.string(),
-    client_secret: z.string(),
-    well_known: z.string(),
-    authorization_endpoint: z.string(),
-    token_endpoint: z.string(),
-    user_info_endpoint: z.string(),
-  }),
-  TelegramOAuthEnabled: z.boolean(),
-  TelegramBotToken: z.string(),
-  TelegramBotName: z.string(),
-  LinuxDOOAuthEnabled: z.boolean(),
-  LinuxDOClientId: z.string(),
-  LinuxDOClientSecret: z.string(),
-  LinuxDOMinimumTrustLevel: z.string(),
-  WeChatAuthEnabled: z.boolean(),
-  WeChatServerAddress: z.string(),
-  WeChatServerToken: z.string(),
-  WeChatAccountQRCodeImageURL: z.string(),
-})
+const createOAuthSchema = (t: TFunction) =>
+  z.object({
+    GitHubOAuthEnabled: z.boolean(),
+    GitHubOAuthMinimumAgeYears: z
+      .number()
+      .int(t('GitHub account age must be a whole number'))
+      .min(0, t('GitHub account age must be between 0 and 100'))
+      .max(
+        MAX_GITHUB_OAUTH_MINIMUM_AGE_YEARS,
+        t('GitHub account age must be between 0 and 100')
+      ),
+    GitHubClientId: z.string(),
+    GitHubClientSecret: z.string(),
+    discord: z.object({
+      enabled: z.boolean(),
+      client_id: z.string(),
+      client_secret: z.string(),
+    }),
+    oidc: z.object({
+      enabled: z.boolean(),
+      display_name: z.string(),
+      client_id: z.string(),
+      client_secret: z.string(),
+      well_known: z.string(),
+      authorization_endpoint: z.string(),
+      token_endpoint: z.string(),
+      user_info_endpoint: z.string(),
+    }),
+    TelegramOAuthEnabled: z.boolean(),
+    TelegramBotToken: z.string(),
+    TelegramBotName: z.string(),
+    LinuxDOOAuthEnabled: z.boolean(),
+    LinuxDOClientId: z.string(),
+    LinuxDOClientSecret: z.string(),
+    LinuxDOMinimumTrustLevel: z.string(),
+    WeChatAuthEnabled: z.boolean(),
+    WeChatServerAddress: z.string(),
+    WeChatServerToken: z.string(),
+    WeChatAccountQRCodeImageURL: z.string(),
+  })
 
-type OAuthFormValues = z.infer<typeof oauthSchema>
+type OAuthFormValues = z.infer<ReturnType<typeof createOAuthSchema>>
 
 type FlatOAuthDefaults = {
   GitHubOAuthEnabled: boolean
+  GitHubOAuthMinimumAgeYears: number
   GitHubClientId: string
   GitHubClientSecret: string
   'discord.enabled': boolean
@@ -177,6 +193,9 @@ function OAuthSetupGuide(props: OAuthSetupGuideProps) {
 
 const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormValues => ({
   GitHubOAuthEnabled: defaults.GitHubOAuthEnabled,
+  GitHubOAuthMinimumAgeYears: normalizeGitHubOAuthMinimumAgeYears(
+    defaults.GitHubOAuthMinimumAgeYears
+  ),
   GitHubClientId: defaults.GitHubClientId ?? '',
   GitHubClientSecret: defaults.GitHubClientSecret ?? '',
   discord: {
@@ -209,6 +228,7 @@ const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormValues => ({
 
 const normalizeFormValues = (values: OAuthFormValues): FlatOAuthDefaults => ({
   GitHubOAuthEnabled: values.GitHubOAuthEnabled,
+  GitHubOAuthMinimumAgeYears: values.GitHubOAuthMinimumAgeYears,
   GitHubClientId: values.GitHubClientId,
   GitHubClientSecret: values.GitHubClientSecret,
   'discord.enabled': values.discord.enabled,
@@ -271,6 +291,7 @@ export function OAuthSection(props: OAuthSectionProps) {
     [props.defaultValues]
   )
 
+  const oauthSchema = useMemo(() => createOAuthSchema(t), [t])
   const form = useForm<OAuthFormValues>({
     resolver: zodResolver(oauthSchema),
     defaultValues: formDefaults,
@@ -346,10 +367,11 @@ export function OAuthSection(props: OAuthSectionProps) {
     }
 
     for (const key of changedKeys) {
-      await updateOption.mutateAsync({
+      const result = await updateOption.mutateAsync({
         key,
         value: normalized[key],
       })
+      if (!result.success) return
     }
 
     baselineRef.current = normalized
@@ -425,6 +447,31 @@ export function OAuthSection(props: OAuthSectionProps) {
                         />
                       </FormControl>
                     </SettingsSwitchItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='GitHubOAuthMinimumAgeYears'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Minimum GitHub Account Age')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0}
+                          max={MAX_GITHUB_OAUTH_MINIMUM_AGE_YEARS}
+                          step={1}
+                          {...safeNumberFieldProps(field)}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Require new GitHub accounts to be this many calendar years old. Set to 0 to disable.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
                   )}
                 />
 

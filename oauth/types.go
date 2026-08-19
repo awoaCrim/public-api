@@ -1,5 +1,7 @@
 package oauth
 
+import "time"
+
 // OAuthToken represents the token received from OAuth provider
 type OAuthToken struct {
 	AccessToken  string `json:"access_token"`
@@ -20,6 +22,9 @@ type OAuthUser struct {
 	DisplayName string
 	// Email is the email from the OAuth provider
 	Email string
+	// CreatedAt is the provider account creation time when the provider exposes it.
+	// It is optional so malformed metadata does not break existing login/bind flows.
+	CreatedAt *time.Time
 	// Extra contains any additional provider-specific data
 	Extra map[string]any
 }
