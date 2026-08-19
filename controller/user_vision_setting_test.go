@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	visionservice "github.com/QuantumNous/new-api/service/vision"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -86,24 +87,16 @@ func setupUserVisionSettingControllerTest(t *testing.T) *model.User {
 	return user
 }
 
-func TestUpdateUserVisionSettingPreservesUnrelatedSettingsAndExplicitZeroValues(t *testing.T) {
-	user := setupUserVisionSettingControllerTest(t)
-	requestBody, err := common.Marshal(UpdateUserVisionSettingRequest{
-		Vision: &dto.UserVisionSetting{
-			Enabled:        false,
-			VisionModel:    "new-vision-model",
-			VisionSuffix:   "-vision",
-			PromptTemplate: "new prompt",
-			PhashThreshold: 0,
-		},
-	})
+func updateUserVisionSettingForTest(t *testing.T, userID int, vision *dto.UserVisionSetting) (bool, string) {
+	t.Helper()
+	requestBody, err := common.Marshal(UpdateUserVisionSettingRequest{Vision: vision})
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/user/setting/vision", bytes.NewReader(requestBody))
 	ctx.Request.Header.Set("Content-Type", "application/json")
-	ctx.Set("id", user.Id)
+	ctx.Set("id", userID)
 
 	UpdateUserVisionSetting(ctx)
 
@@ -112,7 +105,117 @@ func TestUpdateUserVisionSettingPreservesUnrelatedSettingsAndExplicitZeroValues(
 		Message string `json:"message"`
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
-	require.True(t, response.Success, response.Message)
+	return response.Success, response.Message
+}
+
+func TestUpdateUserVisionSettingRejectsOutOfRangeThresholdWithoutMutation(t *testing.T) {
+	for _, threshold := range []int{-1, 65} {
+		t.Run(fmt.Sprintf("threshold_%d", threshold), func(t *testing.T) {
+			user := setupUserVisionSettingControllerTest(t)
+			originalSetting := user.Setting
+
+			success, _ := updateUserVisionSettingForTest(t, user.Id, &dto.UserVisionSetting{
+				Enabled:        false,
+				VisionModel:    "new-vision-model",
+				VisionSuffix:   "-vision",
+				PromptTemplate: "new prompt",
+				PhashThreshold: threshold,
+			})
+			assert.False(t, success)
+
+			var unchanged model.User
+			require.NoError(t, model.DB.First(&unchanged, user.Id).Error)
+			assert.Equal(t, originalSetting, unchanged.Setting)
+		})
+	}
+}
+
+func TestUpdateUserSettingRejectsOutOfRangeVisionThresholdWithoutMutation(t *testing.T) {
+	user := setupUserVisionSettingControllerTest(t)
+	originalSetting := user.Setting
+	requestBody, err := common.Marshal(UpdateUserSettingRequest{
+		QuotaWarningType:      dto.NotifyTypeWebhook,
+		QuotaWarningThreshold: 100,
+		WebhookUrl:            "https://notify.example/new-webhook",
+		Vision: &dto.UserVisionSetting{
+			Enabled:        true,
+			VisionModel:    "new-vision-model",
+			VisionSuffix:   "-vision",
+			PromptTemplate: "new prompt",
+			PhashThreshold: 65,
+		},
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/user/setting", bytes.NewReader(requestBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", user.Id)
+
+	UpdateUserSetting(ctx)
+
+	var response struct {
+		Success bool `json:"success"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.False(t, response.Success)
+
+	var unchanged model.User
+	require.NoError(t, model.DB.First(&unchanged, user.Id).Error)
+	assert.Equal(t, originalSetting, unchanged.Setting)
+}
+
+func TestUpdateUserVisionSettingAcceptsThresholdBounds(t *testing.T) {
+	for _, threshold := range []int{0, 64} {
+		t.Run(fmt.Sprintf("threshold_%d", threshold), func(t *testing.T) {
+			user := setupUserVisionSettingControllerTest(t)
+
+			success, message := updateUserVisionSettingForTest(t, user.Id, &dto.UserVisionSetting{
+				Enabled:        true,
+				VisionModel:    "vision-model",
+				VisionSuffix:   "-vision",
+				PromptTemplate: "custom prompt",
+				PhashThreshold: threshold,
+			})
+			require.True(t, success, message)
+
+			var updated model.User
+			require.NoError(t, model.DB.First(&updated, user.Id).Error)
+			got := updated.GetSetting()
+			require.NotNil(t, got.Vision)
+			assert.Equal(t, threshold, got.Vision.PhashThreshold)
+		})
+	}
+}
+
+func TestUpdateUserVisionSettingUsesDefaultPromptWhenBlank(t *testing.T) {
+	user := setupUserVisionSettingControllerTest(t)
+	success, message := updateUserVisionSettingForTest(t, user.Id, &dto.UserVisionSetting{
+		Enabled:        true,
+		VisionModel:    "vision-model",
+		VisionSuffix:   "-vision",
+		PromptTemplate: " \n\t",
+	})
+	require.True(t, success, message)
+
+	var updated model.User
+	require.NoError(t, model.DB.First(&updated, user.Id).Error)
+	got := updated.GetSetting()
+	require.NotNil(t, got.Vision)
+	assert.Equal(t, visionservice.DefaultPromptTemplate, got.Vision.PromptTemplate)
+}
+
+func TestUpdateUserVisionSettingPreservesUnrelatedSettingsAndExplicitZeroValues(t *testing.T) {
+	user := setupUserVisionSettingControllerTest(t)
+	success, message := updateUserVisionSettingForTest(t, user.Id, &dto.UserVisionSetting{
+		Enabled:        false,
+		VisionModel:    "new-vision-model",
+		VisionSuffix:   "-vision",
+		PromptTemplate: "new prompt",
+		PhashThreshold: 0,
+	})
+	require.True(t, success, message)
 
 	var updated model.User
 	require.NoError(t, model.DB.First(&updated, user.Id).Error)

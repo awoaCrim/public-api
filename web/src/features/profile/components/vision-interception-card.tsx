@@ -17,17 +17,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Eye, Loader2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { TitledCard } from '@/components/ui/titled-card'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { updateUserVisionSettings } from '../api'
-import { parseUserSettings } from '../lib'
+import { normalizeVisionPrompt, parseUserSettings } from '../lib'
 import type { UserProfile } from '../types'
 
 type VisionInterceptionCardProps = {
@@ -39,6 +41,11 @@ export function VisionInterceptionCard(props: VisionInterceptionCardProps) {
   const { t } = useTranslation()
   const { auth } = useAuthStore()
   const [saving, setSaving] = useState(false)
+  const visionModelId = useId()
+  const visionSuffixId = useId()
+  const promptTemplateId = useId()
+  const phashThresholdId = useId()
+  const phashThresholdDescriptionId = useId()
 
   const savedVision = useMemo(() => {
     const settings = parseUserSettings(props.profile?.setting)
@@ -53,7 +60,7 @@ export function VisionInterceptionCard(props: VisionInterceptionCardProps) {
     savedVision?.vision_suffix ?? ''
   )
   const [promptTemplate, setPromptTemplate] = useState(
-    savedVision?.prompt_template ?? ''
+    normalizeVisionPrompt(savedVision?.prompt_template)
   )
   const [phashThreshold, setPhashThreshold] = useState(
     savedVision?.phash_threshold ?? 0
@@ -63,19 +70,23 @@ export function VisionInterceptionCard(props: VisionInterceptionCardProps) {
     setEnabled(savedVision?.enabled ?? false)
     setVisionModel(savedVision?.vision_model ?? '')
     setVisionSuffix(savedVision?.vision_suffix ?? '')
-    setPromptTemplate(savedVision?.prompt_template ?? '')
+    setPromptTemplate(normalizeVisionPrompt(savedVision?.prompt_template))
     setPhashThreshold(savedVision?.phash_threshold ?? 0)
   }, [savedVision])
 
   const handleSave = async () => {
+    if (saving) {
+      return
+    }
     setSaving(true)
+    const effectivePromptTemplate = normalizeVisionPrompt(promptTemplate)
     try {
       const response = await updateUserVisionSettings({
         vision: {
           enabled,
           vision_model: visionModel,
           vision_suffix: visionSuffix,
-          prompt_template: promptTemplate,
+          prompt_template: effectivePromptTemplate,
           phash_threshold: phashThreshold,
         },
       })
@@ -96,13 +107,14 @@ export function VisionInterceptionCard(props: VisionInterceptionCardProps) {
               enabled,
               vision_model: visionModel,
               vision_suffix: visionSuffix,
-              prompt_template: promptTemplate,
+              prompt_template: effectivePromptTemplate,
               phash_threshold: phashThreshold,
             },
           }),
         })
       }
 
+      setPromptTemplate(effectivePromptTemplate)
       props.onProfileUpdate()
       toast.success(t('Vision settings saved'))
     } catch {
@@ -118,11 +130,18 @@ export function VisionInterceptionCard(props: VisionInterceptionCardProps) {
       description={t(
         'Replace images with text descriptions when the model matches the configured suffix.'
       )}
-      icon={<Eye className='h-4 w-4' />}
+      icon={<Eye className='h-4 w-4' aria-hidden='true' />}
       iconTone='chart-2'
       disableHoverEffect
     >
-      <div className='flex flex-col gap-4'>
+      <form
+        className='flex flex-col gap-4'
+        aria-busy={saving}
+        onSubmit={(event) => {
+          event.preventDefault()
+          void handleSave()
+        }}
+      >
         <div className='flex items-center justify-between gap-4'>
           <div className='space-y-1'>
             <div className='text-sm font-medium'>
@@ -134,21 +153,31 @@ export function VisionInterceptionCard(props: VisionInterceptionCardProps) {
               )}
             </p>
           </div>
-          <Switch checked={enabled} onCheckedChange={setEnabled} />
+          <Switch
+            aria-label={t('Enable Vision Interception')}
+            checked={enabled}
+            onCheckedChange={setEnabled}
+          />
         </div>
 
         <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
           <div className='space-y-1'>
-            <div className='text-sm font-medium'>{t('Vision Model')}</div>
+            <label className='text-sm font-medium' htmlFor={visionModelId}>
+              {t('Vision Model')}
+            </label>
             <Input
+              id={visionModelId}
               value={visionModel}
               onChange={(e) => setVisionModel(e.target.value)}
               placeholder={t('Vision model name')}
             />
           </div>
           <div className='space-y-1'>
-            <div className='text-sm font-medium'>{t('Model Suffix')}</div>
+            <label className='text-sm font-medium' htmlFor={visionSuffixId}>
+              {t('Model Suffix')}
+            </label>
             <Input
+              id={visionSuffixId}
               value={visionSuffix}
               onChange={(e) => setVisionSuffix(e.target.value)}
               placeholder={t('e.g. -vision')}
@@ -157,26 +186,35 @@ export function VisionInterceptionCard(props: VisionInterceptionCardProps) {
         </div>
 
         <div className='space-y-1'>
-          <div className='text-sm font-medium'>{t('Prompt Template')}</div>
-          <Input
+          <label className='text-sm font-medium' htmlFor={promptTemplateId}>
+            {t('Prompt Template')}
+          </label>
+          <Textarea
+            id={promptTemplateId}
+            rows={9}
             value={promptTemplate}
             onChange={(e) => setPromptTemplate(e.target.value)}
-            placeholder={t('Describe this image in detail.')}
           />
         </div>
 
         <div className='space-y-1'>
-          <div className='text-sm font-medium'>{t('pHash Threshold')}</div>
+          <label className='text-sm font-medium' htmlFor={phashThresholdId}>
+            {t('pHash Threshold')}
+          </label>
           <Input
+            id={phashThresholdId}
             type='number'
             min={0}
             max={64}
+            step={1}
             value={phashThreshold}
-            onChange={(e) =>
-              setPhashThreshold(Number.parseInt(e.target.value, 10) || 0)
-            }
+            aria-describedby={phashThresholdDescriptionId}
+            onChange={(e) => setPhashThreshold(Number(e.target.value))}
           />
-          <p className='text-muted-foreground text-xs'>
+          <p
+            id={phashThresholdDescriptionId}
+            className='text-muted-foreground text-xs'
+          >
             {t(
               'Hamming distance for near-duplicate image clustering. 0 disables perceptual deduplication.'
             )}
@@ -184,19 +222,18 @@ export function VisionInterceptionCard(props: VisionInterceptionCardProps) {
         </div>
 
         <div className='flex items-center justify-end gap-2'>
-          {saving && (
-            <Loader2 className='text-muted-foreground size-4 animate-spin' />
-          )}
-          <button
-            type='button'
-            className='bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-9 items-center rounded-md px-4 text-sm font-medium disabled:opacity-50'
-            disabled={saving}
-            onClick={handleSave}
-          >
+          <Button type='submit' size='lg' disabled={saving}>
+            {saving && (
+              <Loader2
+                className='animate-spin'
+                data-icon='inline-start'
+                aria-hidden='true'
+              />
+            )}
             {t('Save')}
-          </button>
+          </Button>
         </div>
-      </div>
+      </form>
     </TitledCard>
   )
 }

@@ -20,15 +20,22 @@ import (
 var visionInterceptPaths = map[string]bool{
 	"/v1/chat/completions": true,
 	"/v1/messages":         true,
+	"/v1/responses":        true,
 	"/chat/completions":    true,
 	"/messages":            true,
 }
+
+type visionImageInterceptor func(*gin.Context, map[string]any, []vision.ImageEntry, dto.UserVisionSetting, string) error
 
 // VisionIntercept replaces images with text descriptions when the user has
 // vision interception enabled and the requested model matches the configured
 // suffix. Failures are logged and the request continues unimpeded (fail-open);
 // the flag "vision_intercepted" marks that interception took place.
 func VisionIntercept() func(c *gin.Context) {
+	return visionIntercept(vision.InterceptImages)
+}
+
+func visionIntercept(interceptImages visionImageInterceptor) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		if !visionInterceptPaths[c.Request.URL.Path] {
 			c.Next()
@@ -92,8 +99,12 @@ func VisionIntercept() func(c *gin.Context) {
 			return
 		}
 
+		// The suffix is a Vision interception trigger only. Keep the client's
+		// model value intact so downstream model mapping and billing continue to
+		// see exactly the model that was requested.
+
 		requestID := c.GetString(common.RequestIdKey)
-		if err := vision.InterceptImages(c, root, images, *setting.Vision, requestID); err != nil {
+		if err := interceptImages(c, root, images, *setting.Vision, requestID); err != nil {
 			logger.LogWarn(c, fmt.Sprintf("[vision_intercept] failed to intercept images: %s", err.Error()))
 			c.Next()
 			return

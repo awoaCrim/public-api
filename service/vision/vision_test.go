@@ -122,6 +122,35 @@ func TestExtractImagesOpenAIAndClaude(t *testing.T) {
 	assert.Equal(t, "data:image/png;base64,BBBB", entries[3].URL)
 }
 
+func TestExtractResponsesInputImagesAndReplacesWithInputText(t *testing.T) {
+	root := map[string]any{
+		"model": "gpt-4o-vision",
+		"input": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "input_text", "text": "describe this"},
+					map[string]any{"type": "input_image", "image_url": "https://img.example/a.png", "detail": "high"},
+				},
+			},
+		},
+	}
+
+	entries, err := ExtractImages(root)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "https://img.example/a.png", entries[0].URL)
+
+	entries[0].Replace("a cat")
+	content := root["input"].([]any)[0].(map[string]any)["content"].([]any)
+	imagePart := content[1].(map[string]any)
+	assert.Equal(t, "input_text", imagePart["type"])
+	assert.Equal(t, "a cat", imagePart["text"])
+	assert.NotContains(t, imagePart, "image_url")
+	assert.NotContains(t, imagePart, "detail")
+	assert.Equal(t, "gpt-4o-vision", root["model"])
+}
+
 func TestExtractImagesRespectsCap(t *testing.T) {
 	root := map[string]any{"messages": []any{}}
 	var content []any
@@ -172,6 +201,44 @@ func TestExtractImagesReplaceHooks(t *testing.T) {
 	assert.Contains(t, string(out), "a cat")
 	assert.Contains(t, string(out), "a dog")
 	assert.NotContains(t, string(out), "img.example")
+}
+
+func TestNormalizePhashThresholdUsesSafeDisabledValueForLegacyInvalidValues(t *testing.T) {
+	assert.Equal(t, 0, NormalizePhashThreshold(-1))
+	assert.Equal(t, 0, NormalizePhashThreshold(65))
+	assert.Equal(t, 0, NormalizePhashThreshold(0))
+	assert.Equal(t, 64, NormalizePhashThreshold(64))
+}
+
+func TestClusterImagesKeepsEveryImageSeparateWithoutDecodingWhenPhashDisabled(t *testing.T) {
+	entries := []ImageEntry{{URL: "https://img.example/a.png"}, {URL: "https://img.example/a.png"}}
+	decodeCalls := 0
+
+	groups := clusterImagesWithDecoder(entries, 0, func(string) (image.Image, error) {
+		decodeCalls++
+		return nil, assert.AnError
+	})
+
+	assert.Zero(t, decodeCalls)
+	require.Len(t, groups, 2)
+	assert.Len(t, groups[0].entries, 1)
+	assert.Len(t, groups[1].entries, 1)
+	assert.Nil(t, groups[0].hash)
+	assert.Nil(t, groups[1].hash)
+}
+
+func TestClusterImagesNormalizesInvalidLegacyThresholdToDisabled(t *testing.T) {
+	uri := testPNGDataURI(t, 8, 8, color.RGBA{B: 255, A: 255})
+	entries := []ImageEntry{{URL: uri}, {URL: uri}}
+
+	for _, threshold := range []int{-1, 65} {
+		groups := clusterImages(entries, threshold)
+		require.Len(t, groups, 2)
+		assert.Len(t, groups[0].entries, 1)
+		assert.Len(t, groups[1].entries, 1)
+		assert.Nil(t, groups[0].hash)
+		assert.Nil(t, groups[1].hash)
+	}
 }
 
 func TestClusterImages(t *testing.T) {
@@ -225,11 +292,50 @@ func TestValidateImageURLRejectsPrivateTargets(t *testing.T) {
 	require.Error(t, ValidateImageURL("file:///etc/passwd"))
 }
 
+func TestNormalizePromptTemplateUsesEvidencePreservingDefault(t *testing.T) {
+	assert.Equal(t, DefaultPromptTemplate, NormalizePromptTemplate(""))
+	assert.Equal(t, DefaultPromptTemplate, NormalizePromptTemplate(" \n\t"))
+	custom := "Use only the visible evidence."
+	assert.Equal(t, custom, NormalizePromptTemplate(custom))
+}
+
 func TestLookupCachedDescriptionIsolation(t *testing.T) {
 	config := dto.UserVisionSetting{VisionModel: "m", PromptTemplate: "p"}
 	// Distinct user ids must never share cached entries.
 	_, found := LookupCachedDescription(1, "https://img.example/a.png", config, nil)
 	assert.False(t, found)
+}
+
+func TestVisionCacheKeyUsesDefaultForBlankPrompt(t *testing.T) {
+	blank := dto.UserVisionSetting{VisionModel: "m"}
+	explicit := dto.UserVisionSetting{VisionModel: "m", PromptTemplate: DefaultPromptTemplate}
+	assert.Equal(t, buildCacheKey(1, "https://img.example/a.png", explicit), buildCacheKey(1, "https://img.example/a.png", blank))
+}
+
+func TestPhashDisabledPreservesExactRequestAndLRUCaches(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("id", 77)
+	config := dto.UserVisionSetting{
+		VisionModel:    "vision-model",
+		PromptTemplate: "describe",
+		PhashThreshold: 0,
+	}
+	phash := uint64(123)
+
+	requestURL := "https://img.example/request-cache.png"
+	storeInRequestCache("request-cache-id", requestURL, "request cached description")
+	desc, cached, err := AnalyzeImage(c, c.Request.Context(), config, requestURL, "request-cache-id", &phash)
+	require.NoError(t, err)
+	assert.True(t, cached)
+	assert.Equal(t, "request cached description", desc)
+
+	lruURL := "https://img.example/lru-cache.png"
+	imageDescCache.Set(buildCacheKey(77, lruURL, config), "lru cached description")
+	desc, found := LookupCachedDescription(77, lruURL, config, &phash)
+	assert.True(t, found)
+	assert.Equal(t, "lru cached description", desc)
 }
 
 func TestInterceptImagesFailsOpenOnInvalidImage(t *testing.T) {

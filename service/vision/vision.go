@@ -37,6 +37,8 @@ import (
 // (data URI or downloaded URL) must fit inside these limits before any decode
 // or upstream call.
 const (
+	MinPhashThreshold     = 0
+	MaxPhashThreshold     = 64
 	MaxBase64ImageBytes   = 20 * 1024 * 1024 // encoded data URI cap
 	maxDecodedImageBytes  = 15 * 1024 * 1024 // decoded byte cap
 	maxImageDimension     = 8192             // per-side pixel cap
@@ -45,6 +47,43 @@ const (
 	MaxImagesPerRequest   = 16               // total extracted image cap per request
 	imageDownloadTimeout  = 30 * time.Second
 )
+
+// DefaultPromptTemplate is used when a legacy or newly-created Vision setting
+// does not contain a prompt. It deliberately asks for evidence-preserving
+// descriptions instead of encouraging unsupported inference.
+const DefaultPromptTemplate = `Describe the provided image as accurately and comprehensively as possible, based strictly on visible evidence.
+
+Preserve all information that may be useful to another AI, including subjects, objects, appearance, actions, colors, materials, spatial relationships, layout, foreground/background, lighting, perspective, composition, UI elements, symbols, diagrams, charts, and visible text.
+
+Transcribe readable text exactly. Mark unreadable text as [illegible].
+
+Do not guess, invent, or infer unsupported identities, locations, relationships, intentions, events, brands, or hidden details. Explicitly mark uncertain observations as uncertain.
+
+Prioritize factual accuracy, spatial relationships, and information preservation over elegant prose or brevity.`
+
+// NormalizePromptTemplate returns the configured prompt, or the canonical
+// default for blank values. Non-blank custom prompts are preserved verbatim.
+func NormalizePromptTemplate(prompt string) string {
+	if strings.TrimSpace(prompt) == "" {
+		return DefaultPromptTemplate
+	}
+	return prompt
+}
+
+// IsValidPhashThreshold reports whether a threshold is within the 64-bit
+// perceptual-hash distance domain.
+func IsValidPhashThreshold(threshold int) bool {
+	return threshold >= MinPhashThreshold && threshold <= MaxPhashThreshold
+}
+
+// NormalizePhashThreshold disables perceptual grouping for malformed legacy
+// values so they cannot accidentally merge unrelated images.
+func NormalizePhashThreshold(threshold int) int {
+	if !IsValidPhashThreshold(threshold) {
+		return MinPhashThreshold
+	}
+	return threshold
+}
 
 // imageDescCache is the cross-request LRU (TTL 10m, 1000 entries). Keys
 // include user/model/prompt identity, so descriptions never leak across
@@ -254,7 +293,8 @@ func hashPrompt(prompt string) string {
 // buildCacheKey derives the LRU cache key including user/model/prompt and the
 // image identity so entries never cross users, models or prompts.
 func buildCacheKey(userId int, imageURL string, config dto.UserVisionSetting) string {
-	return fmt.Sprintf("%d|%s|%s|%s", userId, config.VisionModel, hashPrompt(config.PromptTemplate), imageURL)
+	prompt := NormalizePromptTemplate(config.PromptTemplate)
+	return fmt.Sprintf("%d|%s|%s|%s", userId, config.VisionModel, hashPrompt(prompt), imageURL)
 }
 
 func storeInRequestCache(requestID, imageURL, desc string) {
@@ -277,7 +317,7 @@ func storeInRequestCache(requestID, imageURL, desc string) {
 // never makes an upstream call. Used for historical images.
 func LookupCachedDescription(userId int, imageURL string, config dto.UserVisionSetting, phash *uint64) (string, bool) {
 	if phash != nil && config.PhashThreshold > 0 {
-		promptHash := hashPrompt(config.PromptTemplate)
+		promptHash := hashPrompt(NormalizePromptTemplate(config.PromptTemplate))
 		if desc, found := phashCache.lookup(userId, config.VisionModel, promptHash, *phash, config.PhashThreshold); found {
 			return desc, true
 		}
@@ -299,6 +339,7 @@ func AnalyzeImage(c *gin.Context, ctx context.Context, config dto.UserVisionSett
 		return "", false, fmt.Errorf("empty image URL")
 	}
 
+	config.PromptTemplate = NormalizePromptTemplate(config.PromptTemplate)
 	userId := c.GetInt("id")
 
 	// L4: cross-request fuzzy pHash cache.

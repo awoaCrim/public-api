@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	visionservice "github.com/QuantumNous/new-api/service/vision"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -1496,6 +1497,12 @@ func UpdateUserVisionSetting(c *gin.Context) {
 		return
 	}
 
+	if !visionservice.IsValidPhashThreshold(req.Vision.PhashThreshold) {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	req.Vision.PromptTemplate = visionservice.NormalizePromptTemplate(req.Vision.PromptTemplate)
+
 	user, err := model.GetUserById(c.GetInt("id"), true)
 	if err != nil {
 		common.ApiError(c, err)
@@ -1533,6 +1540,13 @@ func UpdateUserSetting(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
+	}
+	if req.Vision != nil {
+		if !visionservice.IsValidPhashThreshold(req.Vision.PhashThreshold) {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
+		req.Vision.PromptTemplate = visionservice.NormalizePromptTemplate(req.Vision.PromptTemplate)
 	}
 
 	// 验证预警类型

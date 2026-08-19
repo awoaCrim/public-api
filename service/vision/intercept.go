@@ -75,15 +75,21 @@ func extractImageFromPart(part map[string]any) (map[string]any, string, string, 
 	partType, _ := part["type"].(string)
 	switch partType {
 	case "image_url", "input_image":
-		inner, ok := part["image_url"].(map[string]any)
-		if !ok {
-			return nil, "", "", false
+		var url string
+		switch inner := part["image_url"].(type) {
+		case string:
+			url = inner
+		case map[string]any:
+			url, _ = inner["url"].(string)
 		}
-		url, _ := inner["url"].(string)
 		if url == "" {
 			return nil, "", "", false
 		}
-		return part, "openai", url, true
+		kind := "openai"
+		if partType == "input_image" {
+			kind = "openai_input"
+		}
+		return part, kind, url, true
 	case "image":
 		src, ok := part["source"].(map[string]any)
 		if !ok {
@@ -109,6 +115,13 @@ func buildReplacer(part map[string]any, kind string) func(string) {
 			delete(part, "image_url")
 			delete(part, "input_image")
 			delete(part, "index")
+		case "openai_input":
+			part["type"] = "input_text"
+			part["text"] = desc
+			delete(part, "image_url")
+			delete(part, "input_image")
+			delete(part, "detail")
+			delete(part, "index")
 		case "claude":
 			for key := range part {
 				delete(part, key)
@@ -128,6 +141,7 @@ func InterceptImages(c *gin.Context, root map[string]any, entries []ImageEntry, 
 		return fmt.Errorf("nil request context")
 	}
 	userId := c.GetInt("id")
+	config.PhashThreshold = NormalizePhashThreshold(config.PhashThreshold)
 	groups := clusterImages(entries, config.PhashThreshold)
 	for _, group := range groups {
 		leader := group.entries[0]
@@ -154,10 +168,23 @@ type imageGroup struct {
 	entries []ImageEntry
 }
 
-// clusterImages groups entries by perceptual hash distance (or exact URL
-// hash when pHash is disabled). Order within groups follows request order,
-// and group order follows the first appearance of its leader.
+// clusterImages groups entries by perceptual hash distance when enabled.
+// A zero or malformed legacy threshold disables pHash work and keeps every
+// image in its own group. Order follows the original request.
 func clusterImages(entries []ImageEntry, phashThreshold int) []imageGroup {
+	return clusterImagesWithDecoder(entries, phashThreshold, decodeImageForHash)
+}
+
+func clusterImagesWithDecoder(entries []ImageEntry, phashThreshold int, decodeImage func(string) (image.Image, error)) []imageGroup {
+	phashThreshold = NormalizePhashThreshold(phashThreshold)
+	if phashThreshold == MinPhashThreshold {
+		groups := make([]imageGroup, 0, len(entries))
+		for _, entry := range entries {
+			groups = append(groups, imageGroup{entries: []ImageEntry{entry}})
+		}
+		return groups
+	}
+
 	type resolved struct {
 		entry ImageEntry
 		hash  uint64
@@ -168,7 +195,7 @@ func clusterImages(entries []ImageEntry, phashThreshold int) []imageGroup {
 		if !isImageURL(e.URL) {
 			continue
 		}
-		img, err := decodeImageForHash(e.URL)
+		img, err := decodeImage(e.URL)
 		if err != nil {
 			// A single undecodable image cannot be described; the middleware
 			// will fail open.
