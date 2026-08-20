@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review cross-layer GitHub OAuth behavior, safe option publication, and meaningful regression coverage."}
+{"file":".trellis/tasks/08-19-complete-github-oauth-registration-age/research/audit.md","reason":"Confirm every independent audit finding is resolved before marking the feature complete."}

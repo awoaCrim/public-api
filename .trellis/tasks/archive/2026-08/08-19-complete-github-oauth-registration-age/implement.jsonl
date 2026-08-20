@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"GitHub OAuth option, registration boundary, localization, test quality, and database compatibility contracts."}
+{"file":".trellis/tasks/08-19-complete-github-oauth-registration-age/research/audit.md","reason":"Independent list of provider, legacy login, settings API, callback, and frontend form gaps to close."}

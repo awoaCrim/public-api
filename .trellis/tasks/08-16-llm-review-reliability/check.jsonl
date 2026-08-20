@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec index and pre-development checklist for controller/service/model changes."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Layer ownership for LLM review controller, service, model, settings, and tests."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Cross-database GORM, JSON wrapper, and AutoMigrate requirements for task mode metadata."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Safe controller errors, provider error masking, and fail-closed semantics."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Meaningful tests, cross-layer review, and JSON/validation constraints."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Sensitive response masking and audit/logging boundaries."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review settings-to-worker-to-task-to-UI data flow and contracts."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review centralized readiness, parsing, and mode logic for duplication."}
+{"file":".trellis/tasks/08-16-llm-review-reliability/research/repo-audit.md","reason":"Confirmed current behavior, production evidence, and product safety decision."}

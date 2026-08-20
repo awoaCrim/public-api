@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec index and pre-development checklist for both child implementations."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Layer ownership for controller, service, model, settings, and frontend API integration."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Cross-database GORM, JSON wrapper, and migration compatibility requirements."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Safe API errors, provider error masking, and fail-closed boundaries."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Testing, cross-layer, JSON, and security quality constraints."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Operational logging and admin-only audit detail requirements."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Data flow and boundary contracts across API, worker, model, and frontend."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Single-source readiness/parser/default logic and review checklist."}
+{"file":".trellis/tasks/08-16-usage-analysis-llm-review/research/repo-audit.md","reason":"Combined repository audit and confirmed product safety decision."}

@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec index and pre-development checklist for controller/service/model changes."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Layer ownership and expected locations for controller, service, model, settings, and frontend-adjacent API changes."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Cross-database GORM, JSON wrapper, AutoMigrate, and compatibility requirements for task metadata changes."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Controller/service error boundaries, masking, and fail-closed behavior."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Testing, JSON, cross-layer, and regression quality requirements."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Operational logging, masking, and durable admin audit requirements."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Required cross-layer contract/data-flow review for API, worker, model, and UI changes."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Avoid duplicate readiness/parsing/translation logic and preserve single sources of truth."}
+{"file":".trellis/tasks/08-16-usage-analysis-llm-review/research/repo-audit.md","reason":"Repository evidence and confirmed product decision for both child deliverables."}

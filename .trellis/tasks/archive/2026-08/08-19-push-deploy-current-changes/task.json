@@ -1,0 +1,30 @@
+{
+  "id": "push-deploy-current-changes",
+  "name": "push-deploy-current-changes",
+  "title": "Push and deploy current changes",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "zeta001",
+  "assignee": "zeta001",
+  "createdAt": "2026-08-19",
+  "completedAt": "2026-08-19",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-19-complete-github-oauth-registration-age",
+    "08-19-complete-vision-interception",
+    "08-19-publish-deploy-completed-product-changes"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

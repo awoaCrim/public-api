@@ -216,3 +216,229 @@ if decimal.NewFromInt(int64(quota)).GreaterThanOrEqual(effectiveThreshold) {
     return nil, ErrCheckinBalanceThreshold
 }
 ```
+
+## Cross-layer contract: Root-scoped usage analysis and fail-closed LLM review
+
+### 1. Scope / Trigger
+
+This contract applies when the root-only usage-analysis dashboard chooses its initial user scope or when the LLM compliance reviewer changes structured-output capability, policy readiness, response normalization, or automatic-ban behavior. Both flows cross the database/model, controller/service, API, and React UI boundaries.
+
+### 2. Signatures
+
+- `GET /api/usage-analysis/options` -> `controller.GetUsageAnalysisOptions`; response `data.root_user_id` is the first enabled `common.RoleRootUser` ID, or `0` when none exists.
+- `GET /api/usage-analysis` -> `controller.GetUsageAnalysis`; the first UI query is issued only after options initialization and includes `user_id=<root_user_id>` when the ID is positive.
+- `getInitialUsageAnalysisSelection(rootUserId, allValue)` -> pure frontend selection/fallback projection.
+- `operation_setting.NormalizePolicyText(raw)` -> shared policy normalization used by readiness checks and reviewer payload construction.
+- `operation_setting.GetReviewReadiness(*LLMReviewSetting)` -> shared readiness predicate for controller enablement, enqueue, worker claims, and in-flight processing.
+- `ReviewClient.TestStructuredOutputCapability(ctx)` -> ordered strict-schema, JSON-object, then prompt-only JSON capability probe.
+- `NormalizeRawLLMResponse(body)` / `ValidateLLMReviewVerdict(data)` -> provider-envelope normalization followed by semantic verdict validation.
+- `ShouldAutoBanWithTrust(verdict, schemaPassed, cfg, outputMode, trustedRaw)` -> final strict-only automatic-ban gate.
+
+### 3. Contracts
+
+- Usage-analysis routes remain `RootAuth`-protected. The options response keeps existing users/tokens/models/channels and adds only the canonical root ID; the root option remains visible even if the bounded user list would otherwise omit it.
+- The usage-analysis React query is disabled while options are loading or failed. On the first successful options response, editable and applied filters are initialized once to the positive root ID; later options refetches never overwrite manual user, token, model, channel, or range selections. A missing root uses the existing `all` sentinel only with a visible fallback warning.
+- LLM readiness requires endpoint/model, administrator-provided sanitized non-empty policy text, and a passing selected structured-output capability. A legacy `schema_tested=true` row means strict-schema mode. Compatibility modes may process valid verdicts for audit/manual review but are never trusted for automatic bans.
+- Capability fallback is attempted only for controlled structured-output rejection or invalid probe output. Authentication, transport, rate-limit, endpoint, and server failures are surfaced as failed capability state rather than hidden by retries of another mode.
+- Accepted reviewer content is a string or an unambiguous array of text parts, optionally containing one fenced or embedded JSON object. Ambiguous, malformed, unsupported, or semantically invalid output is auditable failure/manual review and cannot ban. Strict validation requires all five verdict fields, rejects undeclared top-level fields, and only trusts a direct JSON object for strict capability; compatibility modes may tolerate non-semantic extra fields or repaired content but remain manual-review-only.
+- `Policy Text` is explicit administrator input. Missing policy is not fetched or invented; legacy tasks complete as uncertain with actionable evidence, while newly triggered work on an unready service is skipped as `review_unavailable`.
+- JSON serialization uses `common.Marshal`/`common.Unmarshal`; ordinary options/task persistence uses GORM and remains valid for SQLite, MySQL, and PostgreSQL.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected result |
+| --- | --- |
+| Options success with enabled Root | First analysis query contains the Root ID; filter displays the Root option. |
+| Options success with no Root | Analysis may use `all`, but the UI visibly warns that Root could not be resolved. |
+| Options request failure | Analysis query remains disabled; the options error is shown. |
+| User selects All Users/another user | Existing sentinel/ID query behavior remains authoritative; no later options refetch resets it. |
+| Review enabled without endpoint/model, policy, or capability pass | Configuration is rejected or new work is recorded as `review_unavailable`; worker makes no reviewer call. |
+| Strict capability rejected but JSON-object/prompt mode passes | Persist the selected compatibility mode and allow manual-review processing; automatic bans remain impossible. |
+| Auth/network/rate/server capability failure | Do not fall back silently; retain a failed/untested readiness state with a masked diagnostic. |
+| Fenced/prose/multiple-object/invalid verdict | Normalize only if unambiguous; otherwise record parse/schema failure and never auto-ban. |
+| Missing policy on a legacy claimed task | Complete as `uncertain` with setup guidance and no claimed violation. |
+
+### 5. Good / Base / Bad Cases
+
+- **Good:** options resolve Root ID 42, the first settled usage query includes `user_id=42`, and a later manual switch to `all` remains selected; a non-strict reviewer passes `json_object`, stores that mode, and only produces manual-review verdicts.
+- **Base:** no Root exists, so the page explicitly shows All Users plus the fallback warning; an unready LLM task is skipped/audited rather than sent to an unsupported endpoint.
+- **Bad:** start the aggregate query before options resolve, label an `all` result as Root, retry an authentication failure through compatibility modes, trust fenced compatibility output for auto-ban, or claim that terms were retrieved when `Policy Text` is empty.
+
+### 6. Tests Required
+
+- Controller options contract: enabled/disabled Root filtering, returned `root_user_id`, visible Root option, and unchanged existing option lists.
+- Frontend helper/query-boundary tests: positive Root selection, missing-root fallback warning, first query ordering/scope, options-failure no-query behavior, and existing manual filter helper behavior.
+- LLM client tests: request shape per mode, ordered fallback, and no fallback for authentication-like errors.
+- Parser/worker tests: text-part arrays, fenced/prose normalization, ambiguity rejection, policy-missing evidence, output-mode persistence, and compatibility/repaired verdicts never auto-ban.
+- Settings/controller tests: readiness prerequisites, strict/compatibility persistence, stale capability reset, and actionable status/error fields. Run focused Go tests plus frontend usage/review tests, typecheck, build, i18n sync, affected-file lint, and `git diff --check`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```tsx
+const analysisQuery = useQuery({
+  queryKey: ['usage-analysis', queryParams],
+  queryFn: () => getUsageAnalysis(queryParams),
+})
+// queryParams initially omits user_id while /options is still loading.
+```
+
+This can present an all-user aggregate as the initial Root view.
+
+#### Correct
+
+```tsx
+const analysisQuery = useQuery({
+  queryKey: ['usage-analysis', queryParams],
+  queryFn: () => getUsageAnalysis(queryParams),
+  enabled: filtersInitialized,
+})
+```
+
+The options response initializes both filter states before the first data request. For LLM review, the equivalent safety boundary is the explicit `ShouldAutoBanWithTrust` check requiring strict mode, current strict capability, semantic validation, and trusted raw content.
+
+## Cross-layer contract: GitHub OAuth registration-age restriction
+
+### 1. Scope / Trigger
+
+This contract applies when GitHub OAuth creates a new local user or when the system settings UI changes the minimum age required for new GitHub registrations. Existing GitHub-linked login and authenticated OAuth account binding are not registration flows and must remain available.
+
+### 2. Signatures
+
+- `common.GitHubOAuthMinimumAgeYearsOptionKey` -> `GitHubOAuthMinimumAgeYears`.
+- `common.ParseGitHubOAuthMinimumAgeYears(value string) (int, error)` -> accepts integer years in the inclusive range `0..100`.
+- `common.GitHubOAuthMinimumAgeYears` -> runtime value; default is `common.DefaultGitHubOAuthMinimumAgeYears` (`1`), and `0` disables the restriction.
+- `oauth.OAuthUser.CreatedAt *time.Time` -> optional provider account creation time.
+- `controller.checkGitHubRegistrationAge(now time.Time, createdAt *time.Time, minimumAgeYears int) error` -> pure age policy check used only before creating a new local GitHub OAuth user.
+- GitHub user retrieval parses the provider `created_at` value as RFC3339; malformed optional metadata is represented as unavailable metadata rather than a fabricated timestamp.
+
+### 3. Contracts
+
+- The system settings payload exposes `GitHubOAuthMinimumAgeYears` in the existing OAuth settings section. The UI accepts whole calendar years from `0` through `100`, displays `0` as disabled, and localizes the label and description in all supported frontend locales.
+- The default is one calendar year. The comparison cutoff is `now.AddDate(-minimumAgeYears, 0, 0)`: an account created exactly at the cutoff is accepted, while a timestamp after the cutoff is rejected.
+- The age check runs after existing numeric/legacy GitHub-ID lookup and registration-enable checks, but immediately before inserting a new local user. Existing linked GitHub users bypass the check.
+- Authenticated OAuth bind flows bypass the registration-age check and retain their existing validation and update behavior.
+- When the restriction is enabled and `created_at` is missing or malformed, new registration fails closed with the localized age-verification error. Existing login and bind flows remain usable.
+- Invalid option values are rejected before persistence/publication. Startup normalization and runtime initialization restore the safe default when a legacy value is empty, malformed, negative, fractional, or above `100`.
+- The OAuth callback must not create a local user before the age check succeeds, and must not map an all-purpose provider error to a misleading “too young” message when metadata is unavailable.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected result |
+| --- | --- |
+| Setting is `0` | Restriction disabled; a new GitHub account may register even when `created_at` is unavailable. |
+| Setting is `1..100`, account is older than the cutoff | New local user is created normally. |
+| Setting is `1..100`, account timestamp equals the cutoff | Registration is allowed. |
+| Setting is `1..100`, account timestamp is newer than the cutoff | No local user is created; return the localized too-new error with the configured year count. |
+| Setting is enabled, `created_at` is absent or malformed | No local user is created; return the localized unable-to-verify-age error. |
+| Existing numeric/legacy GitHub-linked user logs in | Existing login behavior is preserved; age metadata is not required. |
+| Authenticated user binds GitHub account | Existing bind behavior is preserved; age metadata is not required. |
+| Option update is outside `0..100` or not an integer | Reject the update and keep the last valid persisted/runtime value; do not publish the invalid value. |
+
+### 5. Good / Base / Bad Cases
+
+- **Good:** parse GitHub `created_at` into `*time.Time`, compare it with `AddDate`, reject only a new registration that is too recent, and return a distinct localized error when the timestamp cannot be verified.
+- **Base:** use the default one-year setting, preserve existing linked-user login and bind flows, and allow an administrator to set `0` to disable the restriction explicitly.
+- **Bad:** compare only the mutable GitHub username, use a fixed 365-day duration instead of calendar years, treat missing metadata as an old account, apply the check to existing login/bind flows, or create the local user before validating age.
+
+### 6. Tests Required
+
+- `common/github_oauth_test.go` covers default, disabled, trimmed, maximum, negative, fractional, empty, malformed, and out-of-range option values.
+- `oauth/github_test.go` covers valid, empty, and malformed GitHub `created_at` parsing without failing the general user-info request.
+- `model/github_oauth_option_test.go` covers invalid-update rejection, safe fallback, and persistence of a valid value.
+- `controller/github_oauth_registration_age_test.go` covers too-new rejection with no user creation, unavailable metadata fail-closed behavior, successful old-account creation, exact calendar cutoff/leap-year behavior, disabled mode, existing-user bypass, and bind-flow bypass.
+- Frontend age-setting tests cover normalization boundaries; affected-file lint/format, i18n synchronization, type-check, and build must pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+// A fixed duration is not equivalent to calendar years, and missing metadata
+// would incorrectly allow an unverifiable new registration.
+if createdAt == nil || time.Since(*createdAt) >= 365*24*time.Hour {
+    createUser()
+}
+```
+
+#### Correct
+
+```go
+if existingUser != nil {
+    return existingUser, nil // preserve existing GitHub login
+}
+if err := checkGitHubRegistrationAge(time.Now(), oauthUser.CreatedAt, minimumAgeYears); err != nil {
+    return nil, err // no local user is inserted on failure
+}
+return createNewOAuthUser(oauthUser)
+```
+
+## Cross-layer contract: user Vision interception threshold and Responses rewriting
+
+### 1. Scope / Trigger
+
+This contract applies when a user saves Vision interception settings or middleware replaces image inputs with descriptions for Chat Completions, Claude-style messages, or the OpenAI Responses API. Threshold validation belongs at every settings write boundary, while malformed legacy data is normalized again at runtime.
+
+### 2. Signatures
+
+- `service/vision.MinPhashThreshold` / `MaxPhashThreshold` -> inclusive domain `0..64`.
+- `vision.ValidatePhashThreshold(int) error` -> rejects new values outside the domain.
+- `vision.NormalizePhashThreshold(int) int` -> returns the value when valid and safe-disabled `0` for malformed legacy values.
+- `PUT /api/user/setting/vision` and legacy `PUT /api/user/setting` -> both validate and normalize `settings.Vision` before persistence.
+- `vision.ExtractImages(root)` / `vision.InterceptImages(...)` -> bounded extraction and all-or-nothing request-tree replacement.
+- `/v1/responses` image part `{type:"input_image", image_url:...}` -> `{type:"input_text", text:<description>}`.
+
+### 3. Contracts
+
+- Values `1..64` enable perceptual-hash grouping. Values outside `0..64` are invalid API input and cannot replace stored user settings.
+- Threshold `0` disables perceptual grouping: each image begins in a separate group and the grouping path performs no image download, decode, or pHash calculation. Exact-URL, request, and LRU caches remain available because they are cache identity, not perceptual clustering.
+- Runtime middleware treats an invalid legacy threshold as `0`, preventing a value above the 64-bit Hamming-distance maximum from merging unrelated images.
+- Blank prompts normalize to `vision.DefaultPromptTemplate`; nonblank custom prompts are preserved verbatim. Backend and frontend canonical defaults must remain byte-for-byte equivalent.
+- Middleware does not publish a partially mutated request. Extraction or analysis failure restores/preserves the complete original body and continues fail-open.
+- Successful Responses rewriting updates `Request.Body`, `common.KeyRequestBody`, and `vision_intercepted`, removes image-only fields, and preserves the client-requested `model`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected result |
+| --- | --- |
+| New threshold `< 0` or `> 64` through either settings endpoint | Reject request; previously stored user settings remain unchanged. |
+| Legacy runtime threshold outside `0..64` | Normalize to `0`; no perceptual grouping. |
+| Threshold `0` with multiple images | Separate groups; no pHash decoder invocation; exact cache hits may still be reused. |
+| Threshold `1..64` | Existing bounded pHash grouping and cache behavior. |
+| Responses analysis succeeds | Replace `input_image` with `input_text`, update reusable body/context marker, preserve model. |
+| Extraction or analysis fails after an in-memory partial replacement | Downstream receives the full original request and interception is not marked successful. |
+| Blank prompt is saved | Persist/use the canonical default prompt. |
+
+### 5. Good / Base / Bad Cases
+
+- **Good:** validate both current and legacy write endpoints, normalize old invalid data to `0`, skip pHash entirely at `0`, and commit the rewritten request only after every image succeeds.
+- **Base:** a valid positive threshold groups near-duplicate images and uses the existing isolated caches and billed Vision sub-call.
+- **Bad:** trust the HTML `min`/`max` attributes, allow `65` to merge every 64-bit hash, compute pHash while claiming disabled, mutate `Request.Body` after only one image succeeds, or rewrite the original model to a Vision suffix/base.
+
+### 6. Tests Required
+
+- Controller tests cover `-1`, `0`, `64`, and `65` through both settings endpoints and assert invalid no-mutation behavior plus blank-prompt normalization.
+- Service tests prove invalid legacy normalization, zero decoder calls at threshold `0`, separate zero-threshold groups, and positive-threshold clustering.
+- Middleware tests exercise real `/v1/responses` success, `Request.Body` plus `KeyRequestBody`, `vision_intercepted`, model preservation, extraction fail-open, and partial-mutation analysis fail-open.
+- Frontend component tests cover the canonical default, blank save, valid/invalid threshold submission, saving accessibility state, API failure, auth-store updates, and profile refresh.
+- Run focused Go/frontend tests, typecheck, affected lint/format/copyright checks, build, and `git diff --check`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+// Values above 64 merge every valid pHash, and zero still hashes images.
+groups := clusterImages(entries, config.PhashThreshold)
+```
+
+#### Correct
+
+```go
+threshold := NormalizePhashThreshold(config.PhashThreshold)
+if threshold == 0 {
+    return separateImageGroups(entries) // no download/decode/pHash
+}
+groups := clusterImages(entries, threshold)
+```

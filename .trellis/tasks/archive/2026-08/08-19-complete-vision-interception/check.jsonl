@@ -1,0 +1,2 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review threshold safety, fail-open middleware behavior, test quality, and repository gates."}
+{"file":".trellis/tasks/08-19-complete-vision-interception/research/audit.md","reason":"Confirm every Vision audit finding and the threshold-zero contract are resolved."}

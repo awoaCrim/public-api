@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend spec index and pre-development checklist for the LLM review implementation."}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Layer ownership for LLM review controller, service, model, settings, and tests."}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Cross-database GORM, JSON wrapper, and AutoMigrate requirements."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Controller/service error contracts, masking, and fail-closed semantics."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Meaningful regression tests and JSON/validation requirements."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Sensitive response masking and audit logging conventions."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Settings-to-worker-to-task-to-UI contract and data-flow review."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Centralize capability/readiness/parser logic and avoid duplicate contracts."}
+{"file":".trellis/tasks/08-16-llm-review-reliability/research/repo-audit.md","reason":"Repository evidence, production state, and confirmed compatibility/policy decision."}
