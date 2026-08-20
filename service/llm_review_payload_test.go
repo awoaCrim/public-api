@@ -290,6 +290,8 @@ func TestBuildPayloadSnapshotSanitizedContract(t *testing.T) {
 		CurrentValue:   12,
 		LimitValue:     10,
 		RequestSnippet: "sanitized snippet",
+		RequestBody:    `{"model":"gpt-4o","password":"***"}`,
+		RequestHeaders: map[string][]string{"Authorization": {"***"}},
 		ClientIP:       "203.0.113.7",
 	}, cfg)
 	require.NotEmpty(t, snapshot)
@@ -303,6 +305,8 @@ func TestBuildPayloadSnapshotSanitizedContract(t *testing.T) {
 	assert.Equal(t, model.LLMReviewTriggerRPM, payload.TriggerType)
 	assert.Equal(t, model.LLMReviewStagePreflight, payload.Stage)
 	assert.Equal(t, 12, payload.CurrentValue)
+	assert.Contains(t, payload.RequestBody, "gpt-4o")
+	assert.Equal(t, []string{"***"}, payload.RequestHeaders["Authorization"])
 }
 
 // llmReviewSettingForTest returns the live review settings with automatic

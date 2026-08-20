@@ -329,7 +329,13 @@ func applyLLMReviewVerdict(task *model.LLMReviewTask, verdict *ReviewVerdictResp
 	switch verdict.Verdict {
 	case "compliant":
 		task.Status = model.LLMReviewTaskCompliant
-		if err := model.RecordLLMReviewCompliant(task.UserId, now); err != nil {
+		var err error
+		if task.TriggerWindowStartAt > 0 {
+			err = model.RecordLLMReviewCompliantForRPMWindow(task.UserId, task.TriggerWindowStartAt, now)
+		} else {
+			err = model.RecordLLMReviewCompliant(task.UserId, now)
+		}
+		if err != nil {
 			logger.LogWarn(context.Background(), fmt.Sprintf("llm review record compliant failed: %v", err))
 		}
 	case "violation":

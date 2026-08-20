@@ -442,3 +442,65 @@ if threshold == 0 {
 }
 groups := clusterImages(entries, threshold)
 ```
+
+## Cross-layer contract: RPM review-window deduplication and reviewer request evidence
+
+### 1. Scope / Trigger
+
+This contract applies when the dedicated per-user RPM limiter rejects a relay request or when RPM/input-token/output-token limits build the payload sent to the LLM compliance reviewer.
+
+### 2. Signatures
+
+- `common.InMemoryRateLimiter.ReserveWithWindow(...)` and `middleware.reserveRedisRPMSlot(...)` -> return the absolute limiter-window start/end for a rejected request.
+- `model.EnqueueLLMReviewTaskForRPMWindow(userID, task, windowStart, windowEnd, now, skipReason)` -> atomically selects at most one event for an RPM window.
+- `common.CaptureLLMReviewRequestContext(c)` -> synchronously returns copied `Summary`, bounded redacted `Body`, and bounded redacted `Headers`.
+- `model.LLMReviewPayload` -> optional `request_body` and `request_headers` reviewer evidence.
+
+### 3. Contracts
+
+- `LLMReviewGrace.ActiveTaskId` limits active work; the separate RPM window marker limits which rejected request represents one limiter episode. Completing a task releases the active slot but does not release its RPM window.
+- The first RPM event in a window may create one pending task, one skipped audit task, or merge once into an already-active task. Later events with the same window identity are successful no-ops: they create no task, skipped row, merge count, or reviewer call, including when asynchronous enqueue is delayed until after the window end.
+- A newer window may be selected after the previous window expires. Window claim, task/audit persistence, active-slot binding, and selected task ID use a transaction plus conditional update/CAS that works on SQLite, MySQL, and PostgreSQL.
+- One RPM window contributes at most one compliant result to the long grace counter. Manual user re-enable clears stale RPM window state.
+- Automatic limit call sites capture request evidence before starting a goroutine. Request Snapshot storage is not a reviewer dependency.
+- Request evidence is bounded and fail-safe. Credential-like body keys and headers are masked; media/base64/file bytes are omitted; multipart keeps bounded text fields and file metadata only. Capture failure never blocks the existing 429 or relay response.
+- The existing OpenAI-compatible 429 headers/body, readiness gates, manual retry, and strict-only automatic-ban trust boundary remain unchanged.
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected result |
+| --- | --- |
+| Concurrent RPM rejections with the same window | Exactly one selected event/task; all responses remain 429. |
+| Same-window duplicate processed after window expiry | Still a duplicate because the stored window identity matches. |
+| First event is review-disabled/unavailable/grace/disabled-user | One skipped audit row with the real reason; later same-window events create no rows. |
+| Selected task completes while the limiter window is live | Active slot is released; same-window RPM events remain suppressed. |
+| A later independent RPM window is rejected | It may select a new event, subject to the existing global active-task rule. |
+| Authorization/Cookie/API-key/token/JWT/base64/file bytes appear in the request | Raw values are absent from task payload and reviewer request. |
+| Body/header capture cannot parse the request | Empty or omission-marked bounded evidence; original request handling continues. |
+
+### 5. Tests Required
+
+- Model tests cover concurrent single-winner selection, completion followed by same-window suppression, delayed duplicate idempotence, skipped-audit deduplication, stale active-slot repair, compliant counting once, new-window selection, and SQLite migration defaults for existing rows.
+- Middleware tests cover Redis and in-memory window boundaries plus unchanged 429 response and reservation-release behavior.
+- Common/service/controller tests cover every automatic trigger path, body-storage preservation, JSON/multipart/header bounds, credential/media redaction, payload policy refresh, and reviewer payload fields.
+- Run focused package tests, `go build ./...`, `go test ./...` when repository assets/dependencies are available, and `git diff --check`.
+
+### 6. Wrong vs Correct
+
+#### Wrong
+
+```go
+// Completion clears ActiveTaskId, so another 429 in the same limiter window
+// can immediately create a second reviewer task.
+active, created, _ := EnqueueLLMReviewTask(userID, task)
+```
+
+#### Correct
+
+```go
+// Window identity is claimed with the task/audit outcome; later identical
+// events are idempotent even after the active task finishes.
+_, selected, _, err := EnqueueLLMReviewTaskForRPMWindow(
+    userID, task, windowStart, windowEnd, now, skipReason,
+)
+```

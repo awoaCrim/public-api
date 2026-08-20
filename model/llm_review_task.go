@@ -83,6 +83,8 @@ type LLMReviewPayload struct {
 	PromptVersion  string               `json:"prompt_version"`
 	SchemaVersion  string               `json:"schema_version"`
 	RequestSnippet string               `json:"request_snippet"`
+	RequestBody    string               `json:"request_body,omitempty"`
+	RequestHeaders map[string][]string  `json:"request_headers,omitempty"`
 	TriggerType    LLMReviewTriggerType `json:"trigger_type"`
 	Stage          LLMReviewStage       `json:"stage"`
 	ModelName      string               `json:"model_name"`
@@ -154,6 +156,11 @@ type LLMReviewTask struct {
 	// sanitized payload submitted to the reviewer.
 	RequestSnippet string `json:"request_snippet" gorm:"type:text"`
 	Payload        string `json:"payload" gorm:"type:text"`
+
+	// TriggerWindowStartAt/EndAt identify the RPM limiter window that selected
+	// this task. Zero means the task was not selected by RPM window deduplication.
+	TriggerWindowStartAt int64 `json:"trigger_window_start_at" gorm:"bigint;index;default:0"`
+	TriggerWindowEndAt   int64 `json:"trigger_window_end_at" gorm:"bigint;index;default:0"`
 
 	Status        LLMReviewTaskStatus `json:"status" gorm:"type:varchar(32);index"`
 	Attempts      int                 `json:"attempts"`
@@ -290,6 +297,15 @@ type LLMReviewGrace struct {
 	// conditional UPDATE (WHERE user_id=? AND active_task_id=0), which is
 	// atomic across SQLite/MySQL/PostgreSQL.
 	ActiveTaskId int64 `json:"active_task_id" gorm:"bigint;index"`
+
+	// RPMReviewWindowStartAt/EndAt remain claimed after task completion so a
+	// sliding-window episode cannot select a replacement task prematurely.
+	RPMReviewWindowStartAt int64 `json:"rpm_review_window_start_at" gorm:"bigint;index;default:0"`
+	RPMReviewWindowEndAt   int64 `json:"rpm_review_window_end_at" gorm:"bigint;index;default:0"`
+	RPMReviewTaskId        int64 `json:"rpm_review_task_id" gorm:"bigint;index;default:0"`
+	// LastCompliantRPMWindowStartAt prevents a repeated verdict application
+	// from contributing twice to the long compliant grace counter.
+	LastCompliantRPMWindowStartAt int64 `json:"-" gorm:"bigint;default:0"`
 
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint"`
 }

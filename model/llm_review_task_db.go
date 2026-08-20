@@ -773,6 +773,20 @@ func GetOrCreateLLMReviewGrace(userId int) (*LLMReviewGrace, error) {
 // RecordLLMReviewCompliant increments the compliant counter and opens a grace
 // window when the configured count is reached.
 func RecordLLMReviewCompliant(userId int, now int64) error {
+	return recordLLMReviewCompliant(userId, now, 0)
+}
+
+// RecordLLMReviewCompliantForRPMWindow applies at most one compliant result to
+// a selected RPM window. The row lock makes the guard safe across workers and
+// the marker is independent from the active task slot.
+func RecordLLMReviewCompliantForRPMWindow(userId int, windowStart, now int64) error {
+	if windowStart <= 0 {
+		return RecordLLMReviewCompliant(userId, now)
+	}
+	return recordLLMReviewCompliant(userId, now, windowStart)
+}
+
+func recordLLMReviewCompliant(userId int, now, rpmWindowStart int64) error {
 	cfg := operation_setting.GetLLMReviewSetting()
 	maxCount := cfg.MaxCompliantCount
 	if maxCount < 1 {
@@ -782,25 +796,37 @@ func RecordLLMReviewCompliant(userId int, now int64) error {
 	if graceHours < 1 {
 		graceHours = 5
 	}
-	grace, err := GetOrCreateLLMReviewGrace(userId)
-	if err != nil {
+	if _, err := GetOrCreateLLMReviewGrace(userId); err != nil {
 		return err
 	}
-	grace.CompliantCount++
-	grace.LastCompliantAt = now
-	if grace.CompliantCount >= maxCount {
-		grace.GraceStartAt = now
-		grace.GraceEndAt = now + int64(graceHours)*3600
-		grace.CompliantCount = 0
-	}
-	return DB.Model(&LLMReviewGrace{}).Where("user_id = ?", userId).
-		Updates(map[string]any{
-			"compliant_count":   grace.CompliantCount,
-			"grace_start_at":    grace.GraceStartAt,
-			"grace_end_at":      grace.GraceEndAt,
-			"last_compliant_at": grace.LastCompliantAt,
-			"updated_at":        common.GetTimestamp(),
-		}).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var grace LLMReviewGrace
+		if err := lockForUpdate(tx).Where("user_id = ?", userId).First(&grace).Error; err != nil {
+			return err
+		}
+		if rpmWindowStart > 0 && grace.LastCompliantRPMWindowStartAt == rpmWindowStart {
+			return nil
+		}
+		grace.CompliantCount++
+		grace.LastCompliantAt = now
+		if rpmWindowStart > 0 {
+			grace.LastCompliantRPMWindowStartAt = rpmWindowStart
+		}
+		if grace.CompliantCount >= maxCount {
+			grace.GraceStartAt = now
+			grace.GraceEndAt = now + int64(graceHours)*3600
+			grace.CompliantCount = 0
+		}
+		return tx.Model(&LLMReviewGrace{}).Where("user_id = ?", userId).
+			Updates(map[string]any{
+				"compliant_count":                    grace.CompliantCount,
+				"grace_start_at":                     grace.GraceStartAt,
+				"grace_end_at":                       grace.GraceEndAt,
+				"last_compliant_at":                  grace.LastCompliantAt,
+				"last_compliant_rpm_window_start_at": grace.LastCompliantRPMWindowStartAt,
+				"updated_at":                         common.GetTimestamp(),
+			}).Error
+	})
 }
 
 // CheckLLMReviewGrace reports whether the user is inside a grace period and
@@ -855,11 +881,15 @@ func RecordLLMReviewManualUnban(userId int, now int64) error {
 	grace.GraceEndAt = 0
 	return DB.Model(&LLMReviewGrace{}).Where("user_id = ?", userId).
 		Updates(map[string]any{
-			"last_manual_unban_at": now,
-			"compliant_count":      0,
-			"grace_start_at":       0,
-			"grace_end_at":         0,
-			"updated_at":           common.GetTimestamp(),
+			"last_manual_unban_at":               now,
+			"compliant_count":                    0,
+			"grace_start_at":                     0,
+			"grace_end_at":                       0,
+			"last_compliant_rpm_window_start_at": 0,
+			"rpm_review_window_start_at":         0,
+			"rpm_review_window_end_at":           0,
+			"rpm_review_task_id":                 0,
+			"updated_at":                         common.GetTimestamp(),
 		}).Error
 }
 

@@ -12,14 +12,18 @@ import (
 const RateLimitExceededMessage = "请求频率超过当前限制，请稍后重试"
 
 type RateLimitReviewTrigger struct {
-	UserID         int
-	ModelName      string
-	Endpoint       string
-	CurrentValue   int
-	LimitValue     int
-	RequestSnippet string
-	ClientIP       string
-	IsStream       bool
+	UserID           int
+	ModelName        string
+	Endpoint         string
+	CurrentValue     int
+	LimitValue       int
+	RequestSnippet   string
+	RequestBody      string
+	RequestHeaders   map[string][]string
+	RPMWindowStartAt int64
+	RPMWindowEndAt   int64
+	ClientIP         string
+	IsStream         bool
 }
 
 // EnqueueRateLimitReview is the replaceable review-trigger seam for RPM
@@ -28,16 +32,20 @@ type RateLimitReviewTrigger struct {
 // the user's state does not allow a reviewer call.
 var EnqueueRateLimitReview = func(_ context.Context, trigger RateLimitReviewTrigger) error {
 	return EnqueueLLMReview(context.Background(), LLMReviewTrigger{
-		UserId:         trigger.UserID,
-		ModelName:      trigger.ModelName,
-		Endpoint:       trigger.Endpoint,
-		CurrentValue:   trigger.CurrentValue,
-		LimitValue:     trigger.LimitValue,
-		RequestSnippet: trigger.RequestSnippet,
-		ClientIP:       trigger.ClientIP,
-		IsStream:       trigger.IsStream,
-		TriggerType:    LLMReviewTriggerRPM,
-		Stage:          LLMReviewStagePreflight,
+		UserId:           trigger.UserID,
+		ModelName:        trigger.ModelName,
+		Endpoint:         trigger.Endpoint,
+		CurrentValue:     trigger.CurrentValue,
+		LimitValue:       trigger.LimitValue,
+		RequestSnippet:   trigger.RequestSnippet,
+		RequestBody:      trigger.RequestBody,
+		RequestHeaders:   trigger.RequestHeaders,
+		RPMWindowStartAt: trigger.RPMWindowStartAt,
+		RPMWindowEndAt:   trigger.RPMWindowEndAt,
+		ClientIP:         trigger.ClientIP,
+		IsStream:         trigger.IsStream,
+		TriggerType:      LLMReviewTriggerRPM,
+		Stage:            LLMReviewStagePreflight,
 	})
 }
 

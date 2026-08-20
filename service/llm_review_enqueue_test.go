@@ -199,6 +199,49 @@ func TestEnqueueLLMReviewSkipsWhenCapabilityIsUntested(t *testing.T) {
 	assert.Contains(t, task.FailureReason, "capability")
 }
 
+func TestEnqueueLLMReviewRPMWindowDeduplicatesAfterCompletion(t *testing.T) {
+	db := useReviewEnqueueTestDB(t)
+	user := createReviewEnqueueUser(t, db, "review-rpm-window", common.RoleCommonUser, common.UserStatusEnabled)
+	cfg := llmReviewSettingForTest(t)
+	cfg.Enabled = true
+	cfg.BaseURL = "https://review.example.com"
+	cfg.ModelName = "reviewer"
+	cfg.PolicyText = "No sharing."
+	cfg.StructuredOutputMode = operation_setting.StructuredOutputModeStrictSchema
+	cfg.StructuredOutputTested = false
+	cfg.SchemaTested = true
+
+	now := common.GetTimestamp()
+	trigger := LLMReviewTrigger{
+		UserId:           user.Id,
+		ModelName:        "gpt-4o",
+		TriggerType:      LLMReviewTriggerRPM,
+		Stage:            LLMReviewStagePreflight,
+		CurrentValue:     6,
+		LimitValue:       5,
+		RPMWindowStartAt: now - 10,
+		RPMWindowEndAt:   now + 50,
+		RequestSnippet:   "first",
+	}
+	require.NoError(t, EnqueueLLMReview(context.Background(), trigger))
+
+	var task model.LLMReviewTask
+	require.NoError(t, db.First(&task).Error)
+	_, claimed, err := model.ClaimLLMReviewTask(task.ID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	task.Status = model.LLMReviewTaskCompliant
+	task.Verdict = model.LLMReviewVerdictCompliant
+	require.NoError(t, model.CompleteLLMReviewTask(&task, nil))
+
+	trigger.RequestSnippet = "second"
+	require.NoError(t, EnqueueLLMReview(context.Background(), trigger))
+
+	var count int64
+	require.NoError(t, db.Model(&model.LLMReviewTask{}).Where("user_id = ?", user.Id).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
 func TestEnqueueLLMReviewMergesIntoActiveTask(t *testing.T) {
 	db := useReviewEnqueueTestDB(t)
 	user := createReviewEnqueueUser(t, db, "review-merge", common.RoleCommonUser, common.UserStatusEnabled)

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend verification entry point"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Review cross-database CAS, transaction, and migration correctness"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review test quality, scope, JSON, and safety contracts"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Review non-blocking limit/reviewer error behavior"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Review request privacy, redaction, and audit behavior"}
+{"file": ".trellis/tasks/08-20-optimize-rate-limit-llm-review-context/research/current-state.md", "reason": "Review against confirmed root cause and recommended behavior"}

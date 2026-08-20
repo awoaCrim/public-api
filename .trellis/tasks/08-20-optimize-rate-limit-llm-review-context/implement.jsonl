@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline entry point and verification contract"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Cross-database transaction, CAS, locking, and migration requirements"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Backend test quality, JSON wrapper, and cross-layer safety rules"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Sensitive-data logging and durable audit boundaries"}
+{"file": ".trellis/tasks/08-20-optimize-rate-limit-llm-review-context/research/current-state.md", "reason": "Root cause, trigger paths, recommended window semantics, and privacy constraints"}

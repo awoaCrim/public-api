@@ -79,8 +79,16 @@ func (r *InMemoryRateLimitReservation) Release() {
 }
 
 func (l *InMemoryRateLimiter) Reserve(key string, maxRequestNum int, duration int64) (bool, *InMemoryRateLimitReservation, int) {
+	allowed, reservation, current, _, _ := l.ReserveWithWindow(key, maxRequestNum, duration)
+	return allowed, reservation, current
+}
+
+// ReserveWithWindow is the RPM reservation variant that exposes the oldest
+// active reservation and its absolute window end. The boundary is returned on
+// rejection so review triggers can deduplicate the same limiter episode.
+func (l *InMemoryRateLimiter) ReserveWithWindow(key string, maxRequestNum int, duration int64) (bool, *InMemoryRateLimitReservation, int, int64, int64) {
 	if maxRequestNum <= 0 || duration <= 0 {
-		return true, nil, 0
+		return true, nil, 0, 0, 0
 	}
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
@@ -100,10 +108,13 @@ func (l *InMemoryRateLimiter) Reserve(key string, maxRequestNum int, duration in
 		*queue = append((*queue)[:0], (*queue)[firstActive:]...)
 	}
 	if len(*queue) >= maxRequestNum {
-		return false, nil, len(*queue) + 1
+		oldest := (*queue)[0]
+		windowStart := time.Unix(0, oldest).Unix()
+		windowEnd := (oldest + duration*int64(time.Second) + int64(time.Second) - 1) / int64(time.Second)
+		return false, nil, len(*queue) + 1, windowStart, windowEnd
 	}
 	*queue = append(*queue, now)
-	return true, &InMemoryRateLimitReservation{limiter: l, key: key, timestamp: now}, len(*queue)
+	return true, &InMemoryRateLimitReservation{limiter: l, key: key, timestamp: now}, len(*queue), 0, 0
 }
 
 func (l *InMemoryRateLimiter) Delete(key string) {

@@ -43,6 +43,12 @@ type LLMReviewTrigger struct {
 	ActualInput    int
 	ActualOutput   int
 	RequestSnippet string
+	RequestBody    string
+	RequestHeaders map[string][]string
+	// RPMWindowStartAt/EndAt are absolute Unix-second boundaries from the
+	// limiter. They are non-zero only for automatic RPM triggers.
+	RPMWindowStartAt int64
+	RPMWindowEndAt   int64
 	// ClientIP is used only to compute the irreversible payload hash and the
 	// partial mask; it is never persisted raw or sent to the reviewer.
 	ClientIP string
@@ -86,29 +92,31 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 	readiness := operation_setting.GetReviewReadiness(cfg)
 	outputMode := readiness.Mode
 	baseTask := &model.LLMReviewTask{
-		UserId:         trigger.UserId,
-		Username:       username,
-		ModelName:      trigger.ModelName,
-		ChannelId:      trigger.ChannelId,
-		ChannelName:    channelName,
-		Endpoint:       trigger.Endpoint,
-		IsStream:       trigger.IsStream,
-		TriggerType:    model.LLMReviewTriggerType(trigger.TriggerType),
-		Stage:          model.LLMReviewStage(trigger.Stage),
-		CurrentValue:   trigger.CurrentValue,
-		LimitValue:     trigger.LimitValue,
-		EstimateInput:  trigger.EstimateInput,
-		ActualInput:    trigger.ActualInput,
-		ActualOutput:   trigger.ActualOutput,
-		RequestSnippet: trigger.RequestSnippet,
-		OutputMode:     outputMode,
-		Payload:        buildPayloadSnapshot(trigger, cfg),
-		MaskedIP:       common.MaskIP(trigger.ClientIP),
+		UserId:               trigger.UserId,
+		Username:             username,
+		ModelName:            trigger.ModelName,
+		ChannelId:            trigger.ChannelId,
+		ChannelName:          channelName,
+		Endpoint:             trigger.Endpoint,
+		IsStream:             trigger.IsStream,
+		TriggerType:          model.LLMReviewTriggerType(trigger.TriggerType),
+		Stage:                model.LLMReviewStage(trigger.Stage),
+		CurrentValue:         trigger.CurrentValue,
+		LimitValue:           trigger.LimitValue,
+		EstimateInput:        trigger.EstimateInput,
+		ActualInput:          trigger.ActualInput,
+		ActualOutput:         trigger.ActualOutput,
+		RequestSnippet:       trigger.RequestSnippet,
+		TriggerWindowStartAt: trigger.RPMWindowStartAt,
+		TriggerWindowEndAt:   trigger.RPMWindowEndAt,
+		OutputMode:           outputMode,
+		Payload:              buildPayloadSnapshot(trigger, cfg),
+		MaskedIP:             common.MaskIP(trigger.ClientIP),
 	}
 
 	// 1. Review disabled: record a skipped audit task, no reviewer calls.
 	if !cfg.Enabled {
-		if err := model.MarkLLMReviewTaskSkipped(baseTask, model.SkipReasonReviewDisabled); err != nil {
+		if err := enqueueReviewTaskOutcome(trigger, baseTask, model.SkipReasonReviewDisabled); err != nil {
 			common.SysLog(fmt.Sprintf("EnqueueLLMReview: record skipped (review_disabled) failed: %v", err))
 		}
 		return nil
@@ -117,7 +125,7 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 	// Preserve these specific audit outcomes before the generic readiness gate;
 	// neither branch can invoke the reviewer or create active work.
 	if banned, _ := model.IsUserPermanentlyBanned(trigger.UserId); banned {
-		if err := model.MarkLLMReviewTaskSkipped(baseTask, model.SkipReasonDisabledUser); err != nil {
+		if err := enqueueReviewTaskOutcome(trigger, baseTask, model.SkipReasonDisabledUser); err != nil {
 			common.SysLog(fmt.Sprintf("EnqueueLLMReview: record skipped (skipped_disabled) failed: %v", err))
 		}
 		return nil
@@ -125,7 +133,7 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 
 	// 3. Grace period: record skipped, no reviewer call.
 	if inGrace, _, err := model.CheckLLMReviewGrace(trigger.UserId, now); err == nil && inGrace {
-		if err := model.MarkLLMReviewTaskSkipped(baseTask, model.SkipReasonGracePeriod); err != nil {
+		if err := enqueueReviewTaskOutcome(trigger, baseTask, model.SkipReasonGracePeriod); err != nil {
 			common.SysLog(fmt.Sprintf("EnqueueLLMReview: record skipped (grace_period) failed: %v", err))
 		}
 		return nil
@@ -135,7 +143,7 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 	// auditable without creating work that the worker cannot safely process.
 	if !readiness.Ready {
 		baseTask.FailureReason = readiness.Reason
-		if err := model.MarkLLMReviewTaskSkipped(baseTask, model.SkipReasonReviewUnavailable); err != nil {
+		if err := enqueueReviewTaskOutcome(trigger, baseTask, model.SkipReasonReviewUnavailable); err != nil {
 			common.SysLog(fmt.Sprintf("EnqueueLLMReview: record skipped (review_unavailable) failed: %v", err))
 		}
 		return nil
@@ -145,29 +153,50 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 	// the enqueue result and the merge retries once so the event is never
 	// silently dropped.
 	task := &model.LLMReviewTask{
-		UserId:             trigger.UserId,
-		Username:           username,
-		ModelName:          trigger.ModelName,
-		ChannelId:          trigger.ChannelId,
-		ChannelName:        channelName,
-		Endpoint:           trigger.Endpoint,
-		IsStream:           trigger.IsStream,
-		TriggerType:        model.LLMReviewTriggerType(trigger.TriggerType),
-		Stage:              model.LLMReviewStage(trigger.Stage),
-		CurrentValue:       trigger.CurrentValue,
-		LimitValue:         trigger.LimitValue,
-		EstimateInput:      trigger.EstimateInput,
-		ActualInput:        trigger.ActualInput,
-		ActualOutput:       trigger.ActualOutput,
-		RequestSnippet:     trigger.RequestSnippet,
-		OutputMode:         outputMode,
-		Payload:            buildPayloadSnapshot(trigger, cfg),
-		MaskedIP:           common.MaskIP(trigger.ClientIP),
-		TriggerRPM:         trigger.TriggerType == LLMReviewTriggerRPM,
-		TriggerInputToken:  trigger.TriggerType == LLMReviewTriggerInputToken,
-		TriggerOutputToken: trigger.TriggerType == LLMReviewTriggerOutputToken,
-		MaxCurrentValue:    trigger.CurrentValue,
-		LastTriggerAt:      now,
+		UserId:               trigger.UserId,
+		Username:             username,
+		ModelName:            trigger.ModelName,
+		ChannelId:            trigger.ChannelId,
+		ChannelName:          channelName,
+		Endpoint:             trigger.Endpoint,
+		IsStream:             trigger.IsStream,
+		TriggerType:          model.LLMReviewTriggerType(trigger.TriggerType),
+		Stage:                model.LLMReviewStage(trigger.Stage),
+		CurrentValue:         trigger.CurrentValue,
+		LimitValue:           trigger.LimitValue,
+		EstimateInput:        trigger.EstimateInput,
+		ActualInput:          trigger.ActualInput,
+		ActualOutput:         trigger.ActualOutput,
+		RequestSnippet:       trigger.RequestSnippet,
+		TriggerWindowStartAt: trigger.RPMWindowStartAt,
+		TriggerWindowEndAt:   trigger.RPMWindowEndAt,
+		OutputMode:           outputMode,
+		Payload:              buildPayloadSnapshot(trigger, cfg),
+		MaskedIP:             common.MaskIP(trigger.ClientIP),
+		TriggerRPM:           trigger.TriggerType == LLMReviewTriggerRPM,
+		TriggerInputToken:    trigger.TriggerType == LLMReviewTriggerInputToken,
+		TriggerOutputToken:   trigger.TriggerType == LLMReviewTriggerOutputToken,
+		MaxCurrentValue:      trigger.CurrentValue,
+		LastTriggerAt:        now,
+	}
+
+	if isRPMWindowTrigger(trigger) {
+		_, selected, _, err := model.EnqueueLLMReviewTaskForRPMWindow(
+			trigger.UserId,
+			task,
+			trigger.RPMWindowStartAt,
+			trigger.RPMWindowEndAt,
+			common.GetTimestamp(),
+			"",
+		)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("EnqueueLLMReview: RPM window enqueue failed: %v", err))
+			return err
+		}
+		if !selected {
+			return nil
+		}
+		return nil
 	}
 
 	for attempt := 0; attempt < 2; attempt++ {
@@ -199,4 +228,25 @@ func EnqueueLLMReview(ctx context.Context, trigger LLMReviewTrigger) error {
 		}
 	}
 	return model.ErrLLMReviewTaskNoLongerActive
+}
+
+func isRPMWindowTrigger(trigger LLMReviewTrigger) bool {
+	return trigger.TriggerType == LLMReviewTriggerRPM &&
+		trigger.RPMWindowStartAt > 0 &&
+		trigger.RPMWindowEndAt > trigger.RPMWindowStartAt
+}
+
+func enqueueReviewTaskOutcome(trigger LLMReviewTrigger, task *model.LLMReviewTask, skipReason string) error {
+	if isRPMWindowTrigger(trigger) {
+		_, _, _, err := model.EnqueueLLMReviewTaskForRPMWindow(
+			trigger.UserId,
+			task,
+			trigger.RPMWindowStartAt,
+			trigger.RPMWindowEndAt,
+			common.GetTimestamp(),
+			skipReason,
+		)
+		return err
+	}
+	return model.MarkLLMReviewTaskSkipped(task, skipReason)
 }

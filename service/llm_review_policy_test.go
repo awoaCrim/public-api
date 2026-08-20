@@ -52,10 +52,10 @@ func TestPayloadWithCurrentReviewPolicyRefreshesVersions(t *testing.T) {
 	cfg := llmReviewSettingForTest(t)
 	cfg.PolicyText = "Current policy."
 
-	out, policy := payloadWithCurrentReviewPolicy(`{"request_snippet":"x","policy_text":"stale"}`)
+	out, policy := payloadWithCurrentReviewPolicy(`{"request_snippet":"x","request_body":"{\"model\":\"gpt-4o\"}","request_headers":{"X-Trace":["ordinary"]},"policy_text":"stale"}`)
 	assert.Equal(t, "Current policy.", policy)
 	require.NotEmpty(t, out)
-	for _, field := range []string{"policy_id", "policy_text", "prompt_version", "schema_version"} {
+	for _, field := range []string{"policy_id", "policy_text", "prompt_version", "schema_version", "request_body", "request_headers"} {
 		assert.Contains(t, out, field)
 	}
 }

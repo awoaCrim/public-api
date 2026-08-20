@@ -484,6 +484,8 @@ func buildPayloadSnapshot(trigger LLMReviewTrigger, cfg *operation_setting.LLMRe
 		PromptVersion:  ReviewPromptVersion,
 		SchemaVersion:  ReviewSchemaVersion,
 		RequestSnippet: trigger.RequestSnippet,
+		RequestBody:    trigger.RequestBody,
+		RequestHeaders: trigger.RequestHeaders,
 		TriggerType:    model.LLMReviewTriggerType(trigger.TriggerType),
 		Stage:          model.LLMReviewStage(trigger.Stage),
 		ModelName:      trigger.ModelName,

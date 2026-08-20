@@ -138,7 +138,7 @@ func rpmRedisKey(userID int) string {
 	return fmt.Sprintf("rateLimit:rpm:%d", userID)
 }
 
-func reserveRedisRPMSlot(c *gin.Context, userID int, durationSeconds int64, maxRPM int) (bool, int, int, error) {
+func reserveRedisRPMSlot(c *gin.Context, userID int, durationSeconds int64, maxRPM int) (bool, int, int, int64, int64, error) {
 	nowMilliseconds := time.Now().UnixMilli()
 	windowMilliseconds := durationSeconds * 1000
 	member := fmt.Sprintf("%d-%s-%d", nowMilliseconds, rpmProcessPrefix, rpmRecordCounter.Add(1))
@@ -152,17 +152,17 @@ func reserveRedisRPMSlot(c *gin.Context, userID int, durationSeconds int64, maxR
 		maxRPM,
 	).Result()
 	if err != nil {
-		return true, 0, 0, err
+		return true, 0, 0, 0, 0, err
 	}
 	values, ok := result.([]interface{})
 	if !ok || len(values) != 3 {
-		return true, 0, 0, fmt.Errorf("unexpected RPM limiter reply %T", result)
+		return true, 0, 0, 0, 0, fmt.Errorf("unexpected RPM limiter reply %T", result)
 	}
 	allowed := redisReplyIntegerForRPM(values[0]) == 1
 	inWindow := int(redisReplyIntegerForRPM(values[1]))
 	if allowed {
 		c.Set(rpmReservedMemberKey, member)
-		return true, inWindow, 0, nil
+		return true, inWindow, 0, 0, 0, nil
 	}
 	oldestMilliseconds := redisReplyIntegerForRPM(values[2])
 	retryAfter := durationSeconds
@@ -172,7 +172,9 @@ func reserveRedisRPMSlot(c *gin.Context, userID int, durationSeconds int64, maxR
 	if retryAfter < 1 {
 		retryAfter = 1
 	}
-	return false, inWindow + 1, int(retryAfter), nil
+	windowStart := oldestMilliseconds / 1000
+	windowEnd := (oldestMilliseconds + windowMilliseconds + 999) / 1000
+	return false, inWindow + 1, int(retryAfter), windowStart, windowEnd, nil
 }
 
 func shouldReleaseRPMSlot(c *gin.Context) bool {
@@ -204,7 +206,7 @@ func enforceRPM(c *gin.Context, durationSeconds int64) bool {
 	}
 	userID := c.GetInt("id")
 	if common.RedisEnabled {
-		allowed, current, retryAfter, err := reserveRedisRPMSlot(c, userID, durationSeconds, configuration.MaxRPM)
+		allowed, current, retryAfter, windowStart, windowEnd, err := reserveRedisRPMSlot(c, userID, durationSeconds, configuration.MaxRPM)
 		if err != nil {
 			logger.LogError(c.Request.Context(), "RPM Redis check failed; request allowed: "+err.Error())
 			return true
@@ -213,13 +215,13 @@ func enforceRPM(c *gin.Context, durationSeconds int64) bool {
 			return true
 		}
 		logger.LogWarn(c.Request.Context(), fmt.Sprintf("RPM limit exceeded user=%d model=%s current=%d limit=%d", userID, modelName, current, configuration.MaxRPM))
-		triggerRateLimitReview(c, userID, modelName, current, configuration.MaxRPM)
+		triggerRateLimitReview(c, userID, modelName, current, configuration.MaxRPM, windowStart, windowEnd)
 		service.WriteRateLimitError(c, service.RateLimitExceededMessage, retryAfter, configuration.MaxRPM, 0)
 		return false
 	}
 
 	key := fmt.Sprintf("RPM:user:%d", userID)
-	allowed, reservation, current := inMemoryRateLimiter.Reserve(key, configuration.MaxRPM, durationSeconds)
+	allowed, reservation, current, windowStart, windowEnd := inMemoryRateLimiter.ReserveWithWindow(key, configuration.MaxRPM, durationSeconds)
 	if allowed {
 		if reservation != nil {
 			c.Set(rpmMemoryReservationKey, reservation)
@@ -227,7 +229,7 @@ func enforceRPM(c *gin.Context, durationSeconds int64) bool {
 		return true
 	}
 	logger.LogWarn(c.Request.Context(), fmt.Sprintf("RPM limit exceeded user=%d model=%s current=%d limit=%d", userID, modelName, current, configuration.MaxRPM))
-	triggerRateLimitReview(c, userID, modelName, current, configuration.MaxRPM)
+	triggerRateLimitReview(c, userID, modelName, current, configuration.MaxRPM, windowStart, windowEnd)
 	service.WriteRateLimitError(c, service.RateLimitExceededMessage, int(durationSeconds), configuration.MaxRPM, 0)
 	return false
 }
@@ -263,16 +265,21 @@ func extractStreamFlag(c *gin.Context) bool {
 	return err == nil && gjson.GetBytes(body, "stream").Bool()
 }
 
-func triggerRateLimitReview(c *gin.Context, userID int, modelName string, currentValue int, limitValue int) {
+func triggerRateLimitReview(c *gin.Context, userID int, modelName string, currentValue int, limitValue int, windowStart, windowEnd int64) {
+	requestContext := common.CaptureLLMReviewRequestContext(c)
 	trigger := service.RateLimitReviewTrigger{
-		UserID:         userID,
-		ModelName:      modelName,
-		Endpoint:       c.Request.URL.Path,
-		CurrentValue:   currentValue,
-		LimitValue:     limitValue,
-		RequestSnippet: common.ExtractRequestSnippet(c),
-		ClientIP:       c.ClientIP(),
-		IsStream:       extractStreamFlag(c),
+		UserID:           userID,
+		ModelName:        modelName,
+		Endpoint:         c.Request.URL.Path,
+		CurrentValue:     currentValue,
+		LimitValue:       limitValue,
+		RequestSnippet:   requestContext.Summary,
+		RequestBody:      requestContext.Body,
+		RequestHeaders:   requestContext.Headers,
+		RPMWindowStartAt: windowStart,
+		RPMWindowEndAt:   windowEnd,
+		ClientIP:         c.ClientIP(),
+		IsStream:         extractStreamFlag(c),
 	}
 	go func() {
 		if err := service.EnqueueRateLimitReview(context.Background(), trigger); err != nil {

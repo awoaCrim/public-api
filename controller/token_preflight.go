@@ -53,10 +53,10 @@ func checkInputTokenPreflight(c *gin.Context, relayInfo *relaycommon.RelayInfo, 
 }
 
 // enqueueInputPreflightReview asynchronously enqueues one input-token
-// preflight trigger. gin.Context is only read synchronously (body snippet,
-// endpoint, stream flag); the goroutine uses the extracted values only.
+// preflight trigger. gin.Context is only read synchronously; the goroutine
+// uses the copied, bounded request context only.
 func enqueueInputPreflightReview(c *gin.Context, relayInfo *relaycommon.RelayInfo, estimate, limit int) {
-	snippet := common.ExtractLLMReviewSnippetFromContext(c)
+	requestContext := common.CaptureLLMReviewRequestContext(c)
 	endpoint := c.Request.URL.Path
 	isStream := relayInfo.IsStream
 	userId := relayInfo.UserId
@@ -81,7 +81,9 @@ func enqueueInputPreflightReview(c *gin.Context, relayInfo *relaycommon.RelayInf
 			CurrentValue:   estimate,
 			LimitValue:     limit,
 			EstimateInput:  estimate,
-			RequestSnippet: snippet,
+			RequestSnippet: requestContext.Summary,
+			RequestBody:    requestContext.Body,
+			RequestHeaders: requestContext.Headers,
 			ClientIP:       clientIP,
 		})
 	})

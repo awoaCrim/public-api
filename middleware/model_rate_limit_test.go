@@ -120,6 +120,9 @@ func TestRPMMiddlewareReturnsOpenAICompatible429(t *testing.T) {
 	previousMainType := common.MainDatabaseType()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.LLMReviewTask{}, &model.LLMReviewAttempt{}, &model.LLMReviewGrace{}, &model.LLMReviewCalibration{}))
 	require.NoError(t, db.Create(&model.User{Id: 73, Username: "rpm429", Role: common.RoleCommonUser, Status: common.UserStatusEnabled}).Error)
 	model.DB = db
@@ -316,10 +319,52 @@ func TestRPMMiddlewareTriggersReviewWithoutBlocking429(t *testing.T) {
 		assert.Equal(t, 2, trigger.CurrentValue)
 		assert.Equal(t, 1, trigger.LimitValue)
 		assert.True(t, trigger.IsStream)
-		assert.Contains(t, trigger.RequestSnippet, `"stream":true`)
+		assert.Contains(t, trigger.RequestSnippet, "hello")
+		assert.Contains(t, trigger.RequestBody, `"stream":true`)
 	case <-time.After(time.Second):
 		t.Fatal("rate-limit review was not triggered")
 	}
+}
+
+func TestMemoryRPMReservationReportsWindowBoundary(t *testing.T) {
+	limiter := common.InMemoryRateLimiter{}
+	limiter.Init(time.Minute)
+
+	allowed, reservation, _, _, _ := limiter.ReserveWithWindow("boundary-user", 1, 60)
+	require.True(t, allowed)
+	t.Cleanup(reservation.Release)
+
+	allowed, _, _, windowStart, windowEnd := limiter.ReserveWithWindow("boundary-user", 1, 60)
+	require.False(t, allowed)
+	assert.Greater(t, windowStart, int64(0))
+	assert.Greater(t, windowEnd, windowStart)
+	assert.GreaterOrEqual(t, windowEnd-windowStart, int64(60))
+	assert.LessOrEqual(t, windowEnd-windowStart, int64(61))
+}
+
+func TestRedisRPMReservationReportsWindowBoundary(t *testing.T) {
+	server := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, rdb.Close()) })
+	previousRDB := common.RDB
+	common.RDB = rdb
+	t.Cleanup(func() { common.RDB = previousRDB })
+
+	first, _ := gin.CreateTestContext(httptest.NewRecorder())
+	first.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	allowed, _, _, _, _, err := reserveRedisRPMSlot(first, 901, 60, 1)
+	require.NoError(t, err)
+	require.True(t, allowed)
+
+	second, _ := gin.CreateTestContext(httptest.NewRecorder())
+	second.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	allowed, _, _, windowStart, windowEnd, err := reserveRedisRPMSlot(second, 901, 60, 1)
+	require.NoError(t, err)
+	require.False(t, allowed)
+	assert.Greater(t, windowStart, int64(0))
+	assert.Greater(t, windowEnd, windowStart)
+	assert.GreaterOrEqual(t, windowEnd-windowStart, int64(60))
+	assert.LessOrEqual(t, windowEnd-windowStart, int64(61))
 }
 
 func TestMemoryRPMWindowReleasesFailedRequests(t *testing.T) {
