@@ -126,3 +126,10 @@
 - 验证：受动包 go test 全绿（仅 2 个预存基线失败：HTTP/2 GOAWAY Windows 偶发、service affinity 共享状态，单跑均通过）；relaykit GOWORK=off 构建通过；前端 typecheck/lint/build/20 个测试通过；git diff --check 通过。
 - 提交：`7f3e5f24`（`feat: pin channel models to fixed endpoints`），未 push。
 - 部署：镜像 `newapi-custom:20260822-fixed-endpoint-7f3e5f24`（ID b4f93ef70360）已切换至 ssh2 生产 `newapi` 容器，Restarts=0，`channel_model_fixed_endpoints` 表已建，`/api/status` 与首页 200。部署前 SQLite 在线备份（`one-api.db`，integrity ok）位于 `/opt/newapi/backups/deploy-20260822-001025-fixed-endpoint-7f3e5f24`（含 compose、.env、旧镜像元数据）。
+
+## 2026-08-22 00:20 +08:00（修复固定端点输入框无法输入并重新部署）
+
+- 问题：固定端点输入框无法输入文字。原因：drawer 用 `form.getValues('model_fixed_endpoints')` 作为受控值，`getValues` 不触发订阅，`setValue` 后组件不重渲染，受控 Input 每次输入都被重置。
+- 修复：改为组件顶层 `form.watch('model_fixed_endpoints')`（watch 订阅变化，setValue 会触发重渲染），编辑回填路径已有 `transformChannelToFormDefaults` 覆盖。
+- 提交：`3c9d0579`（`fix: subscribe fixed endpoint field so the input stays editable`），未 push。
+- 部署：镜像 `newapi-custom:20260822-fixed-endpoint-3c9d0579`（ID b6cc0db2f12f）已切换，Restarts=0，`/api/status` 与首页 200；部署前备份 `/opt/newapi/backups/deploy-20260822-0019xx-fixed-endpoint-3c9d0579`（one-api.db integrity ok）。
