@@ -1,0 +1,5 @@
+{"file":"web/AGENTS.md","reason":"Frontend React Query, deterministic regression test, typecheck, lint, format, and build requirements."}
+{"file":".trellis/spec/backend/deployment-guidelines.md","reason":"Committed-ref deployment, backup, application-service recreation, health verification, and rollback contract."}
+{"file":".trellis/tasks/08-21-fix-group-cache-and-stale-references/prd.md","reason":"Approved user-visible requirements, migration boundaries, retained historical data, and acceptance criteria."}
+{"file":".trellis/tasks/08-21-fix-group-cache-and-stale-references/design.md","reason":"Root cause, centralized hook boundary, transaction design, rollout, and rollback decisions."}
+{"file":".trellis/tasks/08-21-fix-group-cache-and-stale-references/research/current-state.md","reason":"Confirmed current GroupRatio values, authorized ssh2 record references, historical counts, and operational constraints."}

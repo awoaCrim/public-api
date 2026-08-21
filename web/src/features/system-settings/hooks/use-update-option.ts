@@ -49,6 +49,11 @@ export function useUpdateOption() {
         // Always refresh system-options
         queryClient.invalidateQueries({ queryKey: ['system-options'] })
 
+        // GroupRatio changes affect the shared groups list
+        if (variables.key === 'GroupRatio') {
+          queryClient.invalidateQueries({ queryKey: ['groups'] })
+        }
+
         // If updating frontend-display-related config, also refresh status
         if (STATUS_RELATED_KEYS.has(variables.key)) {
           queryClient.invalidateQueries({ queryKey: ['status'] })

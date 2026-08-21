@@ -1,0 +1,6 @@
+{"file":"web/AGENTS.md","reason":"Review frontend behavior tests, React Query invalidation scope, typecheck, lint, and build compliance."}
+{"file":".trellis/spec/backend/deployment-guidelines.md","reason":"Review deployment path audit, committed source archive, backup/rollback, remote health, and served-asset checks."}
+{"file":".trellis/tasks/08-21-fix-group-cache-and-stale-references/prd.md","reason":"Check every acceptance criterion, including failed/unrelated update behavior, exact migration scope, and historical retention."}
+{"file":".trellis/tasks/08-21-fix-group-cache-and-stale-references/design.md","reason":"Review root-cause coverage, centralized hook design, transaction boundaries, exact predicates, and rollback safety."}
+{"file":".trellis/tasks/08-21-fix-group-cache-and-stale-references/implement.md","reason":"Review test-first order, validation gates, authorized path audit, commit/push/deploy sequence, and restart/health checks."}
+{"file":".trellis/tasks/08-21-fix-group-cache-and-stale-references/research/current-state.md","reason":"Cross-check the implementation and migration against confirmed production references and retained historical counts."}
