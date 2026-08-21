@@ -107,7 +107,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 
 	// A model pinned to a fixed endpoint may only be served through that
 	// endpoint; anything else is rejected outright.
-	if err := model.CheckChannelModelFixedEndpoint(ch.Id, info.OriginModelName, ch.GetBaseURL()); err != nil {
+	if err := model.CheckChannelModelFixedEndpoint(c.Request.URL.Path, ch.Id, info.OriginModelName, ch.GetBaseURL()); err != nil {
 		return service.TaskErrorWrapperLocal(errors.New(err.Error()), "fixed_endpoint_mismatch", http.StatusForbidden)
 	}
 

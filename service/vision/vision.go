@@ -615,7 +615,7 @@ func setupVisionChannelContext(c *gin.Context, channel *model.Channel, modelName
 
 	// A model pinned to a fixed endpoint may only be served through that
 	// endpoint; anything else is rejected outright.
-	if err := model.CheckChannelModelFixedEndpoint(channel.Id, modelName, channel.GetBaseURL()); err != nil {
+	if err := model.CheckChannelModelFixedEndpoint(c.Request.URL.Path, channel.Id, modelName, channel.GetBaseURL()); err != nil {
 		return types.NewError(err, types.ErrorCodeFixedEndpointMismatch, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusForbidden))
 	}
 	return nil

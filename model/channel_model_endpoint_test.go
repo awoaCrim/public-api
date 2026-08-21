@@ -47,17 +47,22 @@ func TestChannelModelFixedEndpointValidation(t *testing.T) {
 	// invalid endpoints are rejected
 	for _, bad := range []string{
 		"", "not-a-url", "ftp://api.example.com", "https://", "https:///no-host",
+		"v1/chat/completions", "/", "//api.example.com", "/v1/chat/completions?x=1/?/",
 	} {
 		err := ReplaceChannelModelFixedEndpoints(DB, channel.Id, map[string]string{
 			"model-a": bad,
 		}, map[string]struct{}{"model-a": {}})
 		require.Error(t, err, "endpoint %q must be rejected", bad)
 	}
+	// API paths (starts with /) are valid fixed endpoints
+	require.NoError(t, ReplaceChannelModelFixedEndpoints(DB, channel.Id, map[string]string{
+		"model-a": "/v1/responses",
+	}, map[string]struct{}{"model-a": {}}))
 
 	// nil map keeps existing rows untouched
 	channel.ModelFixedEndpoints = nil
 	require.NoError(t, channel.Update())
-	require.Equal(t, "https://api.example.com", GetChannelModelFixedEndpoint(channel.Id, "model-a"))
+	require.Equal(t, "/v1/responses", GetChannelModelFixedEndpoint(channel.Id, "model-a"))
 }
 
 func TestChannelModelFixedEndpointRejectsMismatchedEndpoint(t *testing.T) {
@@ -73,32 +78,41 @@ func TestChannelModelFixedEndpointRejectsMismatchedEndpoint(t *testing.T) {
 	}
 	endpoints := map[string]string{
 		"model-a": "https://api.allowed.example.com/",
+		"model-b": "/v1/responses",
 	}
 	channel.ModelFixedEndpoints = &endpoints
 	require.NoError(t, channel.Insert())
 	t.Cleanup(func() { require.NoError(t, channel.Delete()) })
 	RefreshChannelFixedEndpointIndex()
 
-	// matching endpoint (normalized) passes
-	require.NoError(t, CheckChannelModelFixedEndpoint(channel.Id, "model-a", "https://api.allowed.example.com"))
-	require.NoError(t, CheckChannelModelFixedEndpoint(channel.Id, "model-a", "https://api.allowed.example.com/"))
-	// unconfigured model always passes
-	require.NoError(t, CheckChannelModelFixedEndpoint(channel.Id, "model-b", "https://anything.example.com"))
-	// mismatched endpoint is rejected with a readable error naming both endpoints
-	err := CheckChannelModelFixedEndpoint(channel.Id, "model-a", "https://api.evil.example.com")
+	// URL-form fixed endpoint compares against the channel base URL
+	require.NoError(t, CheckChannelModelFixedEndpoint("", channel.Id, "model-a", "https://api.allowed.example.com"))
+	require.NoError(t, CheckChannelModelFixedEndpoint("", channel.Id, "model-a", "https://api.allowed.example.com/"))
+	err := CheckChannelModelFixedEndpoint("", channel.Id, "model-a", "https://api.evil.example.com")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "model-a")
 	assert.Contains(t, err.Error(), "https://api.allowed.example.com")
 	assert.Contains(t, err.Error(), "https://api.evil.example.com")
-	// empty channel endpoint never matches a fixed endpoint
-	err = CheckChannelModelFixedEndpoint(channel.Id, "model-a", "")
+	err = CheckChannelModelFixedEndpoint("", channel.Id, "model-a", "")
 	require.Error(t, err)
+
+	// path-form fixed endpoint compares against the incoming request path
+	require.NoError(t, CheckChannelModelFixedEndpoint("/v1/responses", channel.Id, "model-b", "https://anything.example.com"))
+	require.NoError(t, CheckChannelModelFixedEndpoint("/v1/responses/?query=1", channel.Id, "model-b", "https://anything.example.com"))
+	err = CheckChannelModelFixedEndpoint("/v1/chat/completions", channel.Id, "model-b", "https://anything.example.com")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "model-b")
+	assert.Contains(t, err.Error(), "/v1/responses")
+	assert.Contains(t, err.Error(), "/v1/chat/completions")
+	// model without a policy always passes
+	require.NoError(t, CheckChannelModelFixedEndpoint("/whatever", channel.Id, "model-c", "https://anything.example.com"))
 
 	// replacing with an empty map clears the restriction
 	channel.ModelFixedEndpoints = &map[string]string{}
 	require.NoError(t, channel.Update())
 	RefreshChannelFixedEndpointIndex()
-	require.NoError(t, CheckChannelModelFixedEndpoint(channel.Id, "model-a", "https://api.evil.example.com"))
+	require.NoError(t, CheckChannelModelFixedEndpoint("/v1/chat/completions", channel.Id, "model-a", "https://api.evil.example.com"))
+	require.NoError(t, CheckChannelModelFixedEndpoint("/v1/chat/completions", channel.Id, "model-b", "https://api.evil.example.com"))
 }
 
 func TestChannelModelFixedEndpointsEqual(t *testing.T) {

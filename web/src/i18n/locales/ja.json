@@ -2837,7 +2837,7 @@
     "Models & Routing": "モデルとルーティング",
     "Models appended successfully": "モデルが正常に追加されました",
     "Models are required": "モデルが必要です",
-    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "モデルを固定エンドポイントに固定できます。他のエンドポイント経由のリクエストは拒否されます。",
+    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "モデルを固定エンドポイントに固定できます（/v1/chat/completions のような API パスまたは完全な URL）。他のエンドポイント経由のリクエストは拒否されます。",
     "Models climbing the leaderboard": "ランキング上昇中のモデル",
     "Models climbing the leaderboard fastest": "ランキングで最も急上昇しているモデル",
     "Models directory": "モデルディレクトリ",

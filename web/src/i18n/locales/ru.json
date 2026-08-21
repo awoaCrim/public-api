@@ -2837,7 +2837,7 @@
     "Models & Routing": "Модели и маршрутизация",
     "Models appended successfully": "Модели успешно добавлены",
     "Models are required": "Требуются модели",
-    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "Модель можно привязать к фиксированному эндпоинту; запросы через любой другой эндпоинт отклоняются.",
+    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "Модель можно привязать к фиксированному эндпоинту (путь API, например /v1/chat/completions, или полный URL); запросы через любой другой эндпоинт отклоняются.",
     "Models climbing the leaderboard": "Модели, поднимающиеся в рейтинге",
     "Models climbing the leaderboard fastest": "Модели, быстрее всех растущие в рейтинге",
     "Models directory": "Каталог моделей",

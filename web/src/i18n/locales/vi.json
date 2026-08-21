@@ -2837,7 +2837,7 @@
     "Models & Routing": "Mô hình & định tuyến",
     "Models appended successfully": "Đã thêm mô hình thành công",
     "Models are required": "Các mô hình được yêu cầu",
-    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "Có thể cố định mô hình vào một endpoint; các yêu cầu qua endpoint khác sẽ bị từ chối.",
+    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "Có thể cố định mô hình vào một endpoint (đường dẫn API như /v1/chat/completions hoặc URL đầy đủ); các yêu cầu qua endpoint khác sẽ bị từ chối.",
     "Models climbing the leaderboard": "Các mô hình đang leo bảng xếp hạng",
     "Models climbing the leaderboard fastest": "Mô hình tăng hạng nhanh nhất",
     "Models directory": "Thư mục mô hình",

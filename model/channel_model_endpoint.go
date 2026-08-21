@@ -31,19 +31,33 @@ func NormalizeChannelModelFixedEndpoint(endpoint string) string {
 	return strings.TrimRight(strings.TrimSpace(endpoint), "/")
 }
 
-// ValidateChannelModelFixedEndpoint reports whether endpoint is a usable
-// http/https base URL.
+// normalizeFixedEndpointPath trims whitespace and trailing slashes of an
+// API path like "/v1/responses" so it compares equal to "/v1/responses/".
+func normalizeFixedEndpointPath(path string) string {
+	return strings.TrimRight(strings.TrimSpace(path), "/")
+}
+
+// ValidateChannelModelFixedEndpoint reports whether endpoint is usable as a
+// fixed endpoint: either an API path starting with "/" (e.g. "/v1/responses")
+// or a full http/https URL.
 func ValidateChannelModelFixedEndpoint(endpoint string) error {
-	normalized := NormalizeChannelModelFixedEndpoint(endpoint)
+	normalized := strings.TrimSpace(endpoint)
 	if normalized == "" {
 		return fmt.Errorf("fixed endpoint must not be empty")
+	}
+	if strings.HasPrefix(normalized, "/") {
+		pathOnly := normalizeFixedEndpointPath(normalized)
+		if pathOnly == "" || strings.HasPrefix(normalized, "//") || strings.ContainsAny(pathOnly, "?#") {
+			return fmt.Errorf("invalid fixed endpoint %q: path must start with a single / (e.g. /v1/chat/completions) without query or fragment", endpoint)
+		}
+		return nil
 	}
 	parsed, err := url.Parse(normalized)
 	if err != nil {
 		return fmt.Errorf("invalid fixed endpoint %q: %v", endpoint, err)
 	}
 	if !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
-		return fmt.Errorf("invalid fixed endpoint %q: must use http or https", endpoint)
+		return fmt.Errorf("invalid fixed endpoint %q: must be an API path starting with / or an http(s) URL", endpoint)
 	}
 	if parsed.Host == "" {
 		return fmt.Errorf("invalid fixed endpoint %q: missing host", endpoint)
@@ -82,12 +96,26 @@ func GetChannelModelFixedEndpoint(channelID int, modelName string) string {
 	return NormalizeChannelModelFixedEndpoint(row.Endpoint)
 }
 
-// CheckChannelModelFixedEndpoint rejects requests whose channel base URL does
-// not match the model's fixed endpoint. Empty fixed endpoint means no
-// restriction.
-func CheckChannelModelFixedEndpoint(channelID int, modelName string, currentBaseURL string) error {
+// CheckChannelModelFixedEndpoint rejects requests that do not match the
+// model's fixed endpoint. A fixed endpoint can be an API path (starts with
+// "/"), which must equal the incoming request path (requestPath), or a full
+// http(s) URL, which must equal the channel's effective base URL. Empty fixed
+// endpoint means no restriction.
+func CheckChannelModelFixedEndpoint(requestPath string, channelID int, modelName string, currentBaseURL string) error {
 	fixed := GetChannelModelFixedEndpoint(channelID, modelName)
 	if fixed == "" {
+		return nil
+	}
+	if strings.HasPrefix(fixed, "/") {
+		// requestPath normally arrives as c.Request.URL.Path (no query); parsing
+		// keeps the comparison robust if a full URL is handed in.
+		requestPath = strings.TrimSpace(requestPath)
+		if parsed, parseErr := url.Parse(requestPath); parseErr == nil && parsed.Path != "" {
+			requestPath = parsed.Path
+		}
+		if normalizeFixedEndpointPath(requestPath) != fixed {
+			return fmt.Errorf("model %s is pinned to fixed endpoint %s, but request path %s does not match", modelName, fixed, requestPath)
+		}
 		return nil
 	}
 	if NormalizeChannelModelFixedEndpoint(currentBaseURL) != fixed {

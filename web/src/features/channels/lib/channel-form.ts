@@ -211,7 +211,22 @@ export const channelFormSchema = z
         })
       )
       .optional(),
-    model_fixed_endpoints: z.record(z.string(), z.string()).optional(),
+    model_fixed_endpoints: z
+      .record(z.string(), z.string())
+      .optional()
+      .refine(
+        (endpoints) =>
+          !endpoints ||
+          Object.values(endpoints).every(
+            (endpoint) =>
+              endpoint.trim() === '' ||
+              (endpoint.trim().startsWith('/') &&
+                !endpoint.trim().startsWith('//') &&
+                !endpoint.includes('?')) ||
+              /^https?:\/\/[^/]+/i.test(endpoint.trim())
+          ),
+        'Fixed endpoint must be an API path (starts with /) or an http(s) URL'
+      ),
     model_mapping: z
       .string()
       .optional()

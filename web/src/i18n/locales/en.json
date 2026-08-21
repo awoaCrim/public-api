@@ -2837,7 +2837,7 @@
     "Models & Routing": "Models & Routing",
     "Models appended successfully": "Models appended successfully",
     "Models are required": "Models are required",
-    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.",
+    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "Models can be pinned to a fixed endpoint (an API path like /v1/chat/completions or a full URL); requests through any other endpoint are rejected.",
     "Models climbing the leaderboard": "Models climbing the leaderboard",
     "Models climbing the leaderboard fastest": "Models climbing the leaderboard fastest",
     "Models directory": "Models directory",

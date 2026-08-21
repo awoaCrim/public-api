@@ -2837,7 +2837,7 @@
     "Models & Routing": "模型與路由",
     "Models appended successfully": "模型已追加成功",
     "Models are required": "需要模型",
-    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "可將模型固定到某個端點，透過其他端點發起的請求將被拒絕。",
+    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "可將模型固定到某個端點（如 /v1/chat/completions 的 API 路徑或完整 URL），透過其他端點發起的請求將被拒絕。",
     "Models climbing the leaderboard": "正在攀升的模型",
     "Models climbing the leaderboard fastest": "排行榜上升最快的模型",
     "Models directory": "模型目錄",

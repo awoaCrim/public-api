@@ -2837,7 +2837,7 @@
     "Models & Routing": "Modèles et routage",
     "Models appended successfully": "Modèles ajoutés avec succès",
     "Models are required": "Les modèles sont requis",
-    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "Un modèle peut être lié à un point de terminaison fixe ; les requêtes passant par tout autre point de terminaison sont rejetées.",
+    "Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.": "Un modèle peut être lié à un point de terminaison fixe (un chemin d'API comme /v1/chat/completions ou une URL complète) ; les requêtes passant par tout autre point de terminaison sont rejetées.",
     "Models climbing the leaderboard": "Modèles qui montent au classement",
     "Models climbing the leaderboard fastest": "Modèles qui grimpent le plus vite au classement",
     "Models directory": "Répertoire des modèles",
