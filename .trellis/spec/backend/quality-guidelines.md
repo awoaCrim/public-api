@@ -18,6 +18,8 @@ For client request DTOs that are decoded and re-marshaled to a provider, optiona
 
 Use `common.UnmarshalBodyReusable` for request flows that need to inspect/parse the body more than once. It preserves a replayable body and supports disk-backed JSON decoding; `middleware/distributor.go` and `relay/common/relay_utils.go` use it for distributed relay/task parsing.
 
+LLM review request evidence must not parse a fixed-size prefix as if it were a complete JSON or multipart body. `common.CaptureLLMReviewRequestContext` may impose a separate bounded capture limit, but once that limit is exceeded it must skip parsing the partial bytes and emit an explicit safe omission marker. Valid payloads within the capture limit must retain their sanitized summary/body evidence, and capture must use independent body-storage readers so the downstream relay can replay the original request. Keep a regression test for a valid JSON request larger than the old capture boundary and for bodies exceeding the current capture limit.
+
 ## Testing conventions
 
 Tests should assert externally meaningful behavior, not implementation details. Prefer deterministic table tests with explicit business inputs and exact expected outputs. Do not add random fuzz/stress loops, sleeps, timing comparisons, log-only assertions, coverage-only smoke tests, or duplicate cases that protect the same branch.

@@ -28,7 +28,11 @@ type LLMReviewRequestContext struct {
 var reviewRequestLongOpaqueText = regexp.MustCompile(`[A-Za-z0-9+/=_-]{128,}`)
 
 const (
-	reviewRequestBodyReadBytes   = 64 << 10
+	// Keep request-context parsing bounded while allowing ordinary large chat
+	// requests to be parsed as complete JSON. This is a reviewer-capture limit,
+	// not the relay request-body limit; larger valid bodies use a safe omission
+	// marker instead of being treated as malformed input.
+	reviewRequestBodyReadBytes   = 256 << 10
 	reviewRequestBodyMaxBytes    = 8 << 10
 	reviewRequestMaxDepth        = 6
 	reviewRequestMaxMapEntries   = 40
@@ -60,7 +64,7 @@ func CaptureLLMReviewRequestContext(c *gin.Context) LLMReviewRequestContext {
 	// Only JSON gets the chat-oriented snippet extractor. Applying the JSON
 	// fallback to multipart or binary bytes would copy file/media content into
 	// request_snippet before the body-specific redaction runs.
-	if isReviewJSONMediaType(mediaType) {
+	if isReviewJSONMediaType(mediaType) && !truncated {
 		var value any
 		if err := Unmarshal(body, &value); err == nil {
 			captured.Summary = maskReviewRequestFreeText(ExtractLLMReviewSnippet(body))
@@ -100,17 +104,23 @@ func redactReviewRequestBody(body []byte, contentType string, truncated bool) st
 		return "[media body omitted]"
 	}
 	if isReviewJSONMediaType(mediaType) {
+		if truncated {
+			return "[json body omitted: exceeds review capture limit]"
+		}
 		var value any
 		if err := Unmarshal(body, &value); err == nil {
 			return marshalBoundedReviewRequestValue(value)
 		}
-		return "[json body omitted: invalid or truncated]"
+		return "[json body omitted: invalid]"
 	}
 	if strings.HasPrefix(strings.ToLower(contentType), "multipart/") {
+		if truncated {
+			return "[multipart body omitted: exceeds review capture limit]"
+		}
 		if value, ok := parseBoundedReviewMultipart(body, contentType); ok {
 			return marshalBoundedReviewRequestValue(value)
 		}
-		return "[multipart body omitted: truncated or invalid]"
+		return "[multipart body omitted: invalid]"
 	}
 	if strings.HasPrefix(strings.ToLower(contentType), "application/x-www-form-urlencoded") {
 		if values, err := url.ParseQuery(string(body)); err == nil {

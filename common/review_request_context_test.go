@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,6 +41,61 @@ func TestCaptureLLMReviewRequestContextRedactsBodyHeadersAndPreservesStorage(t *
 	stored, err := storage.Bytes()
 	require.NoError(t, err)
 	assert.Equal(t, body, string(stored))
+}
+
+func TestCaptureLLMReviewRequestContextParsesLargeJSONAndPreservesBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := `{"model":"gpt-4o","messages":[{"role":"system","content":"` + strings.Repeat("prefix ", 10000) + `"},{"role":"user","content":"message after the old 64 KiB prefix"}],"password":"do-not-store"}`
+	require.Greater(t, len(body), 64<<10)
+	storage, err := CreateBodyStorage([]byte(body))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(nil))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(KeyBodyStorage, storage)
+
+	captured := CaptureLLMReviewRequestContext(c)
+	assert.Contains(t, captured.Summary, "message after the old 64 KiB prefix")
+	assert.Contains(t, captured.Body, "message after the old 64 KiB prefix")
+	assert.NotContains(t, captured.Body, "do-not-store")
+	assert.NotContains(t, captured.Body, "[json body omitted: invalid or truncated]")
+	assert.LessOrEqual(t, len(captured.Body), reviewRequestBodyMaxBytes)
+
+	reader, err := storage.NewReader()
+	require.NoError(t, err)
+	replayed, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	assert.Equal(t, body, string(replayed))
+}
+
+func TestCaptureLLMReviewRequestContextBoundsOversizedJSONWithoutTreatingItAsInvalid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"` + strings.Repeat("x", reviewRequestBodyReadBytes) + `"}],"password":"do-not-store"}`
+	require.Greater(t, len(body), reviewRequestBodyReadBytes)
+	var decoded any
+	require.NoError(t, Unmarshal([]byte(body), &decoded))
+
+	storage, err := CreateBodyStorage([]byte(body))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, storage.Close()) })
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(nil))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(KeyBodyStorage, storage)
+
+	captured := CaptureLLMReviewRequestContext(c)
+	assert.Empty(t, captured.Summary)
+	assert.Equal(t, "[json body omitted: exceeds review capture limit]", captured.Body)
+	assert.NotContains(t, captured.Body, "do-not-store")
+	assert.LessOrEqual(t, len(captured.Body), reviewRequestBodyMaxBytes)
+
+	replayed, err := storage.Bytes()
+	require.NoError(t, err)
+	assert.Equal(t, body, string(replayed))
 }
 
 func TestCaptureLLMReviewRequestContextRedactsSnakeCaseCredentials(t *testing.T) {
