@@ -716,6 +716,7 @@ export function ChannelMutateDrawer({
   const currentModels = form.watch('models')
   const currentName = form.watch('name')
   const currentModelMapping = form.watch('model_mapping')
+  const currentFixedEndpoints = form.watch('model_fixed_endpoints')
   const awsKeyType = form.watch('aws_key_type')
   const vertexKeyType = form.watch('vertex_key_type')
   const upstreamModelUpdateCheckEnabled = form.watch(
@@ -3627,16 +3628,10 @@ export function ChannelMutateDrawer({
                                     groupOptions={groupOptions}
                                     value={field.value ?? []}
                                     onChange={field.onChange}
-                                    fixedEndpoints={
-                                      form.getValues(
-                                        'model_fixed_endpoints'
-                                      ) ?? {}
-                                    }
+                                    fixedEndpoints={currentFixedEndpoints ?? {}}
                                     onFixedEndpointChange={(model, endpoint) => {
                                       const next = {
-                                        ...form.getValues(
-                                          'model_fixed_endpoints'
-                                        ),
+                                        ...currentFixedEndpoints,
                                       }
                                       if (endpoint.trim() === '') {
                                         delete next[model]
