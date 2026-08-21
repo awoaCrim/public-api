@@ -60,6 +60,11 @@ const (
 	ErrorCodeChannelInvalidKey            ErrorCode = "channel:invalid_key"
 	ErrorCodeChannelResponseTimeExceeded  ErrorCode = "channel:response_time_exceeded"
 
+	// model endpoint error. No "channel:" prefix on purpose: IsChannelError would
+	// treat a fixed-endpoint rejection as a retryable channel failure, while the
+	// requirement is to reject the request outright.
+	ErrorCodeFixedEndpointMismatch ErrorCode = "fixed_endpoint_mismatch"
+
 	// client request error
 	ErrorCodeReadRequestBodyFailed ErrorCode = "read_request_body_failed"
 	ErrorCodeConvertRequestFailed  ErrorCode = "convert_request_failed"

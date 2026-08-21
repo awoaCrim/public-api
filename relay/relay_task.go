@@ -105,6 +105,12 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		info.ApiKey = key
 	}
 
+	// A model pinned to a fixed endpoint may only be served through that
+	// endpoint; anything else is rejected outright.
+	if err := model.CheckChannelModelFixedEndpoint(ch.Id, info.OriginModelName, ch.GetBaseURL()); err != nil {
+		return service.TaskErrorWrapperLocal(errors.New(err.Error()), "fixed_endpoint_mismatch", http.StatusForbidden)
+	}
+
 	// 提取 remix 参数（时长、分辨率 → OtherRatios）
 	if info.Action == constant.TaskActionRemix {
 		if originTask.PrivateData.BillingContext != nil {

@@ -94,6 +94,7 @@ func InitChannelCache() {
 	}
 	channelsIDM = newChannelId2channel
 	channel2advancedCustomConfig = newChannel2advancedCustomConfig
+	RefreshChannelFixedEndpointIndex()
 	channelSyncLock.Unlock()
 	// Lock ordering: InvalidatePricingCache acquires updatePricingLock, and
 	// GetPricing (holding updatePricingLock) nests channelSyncLock.RLock via
@@ -320,6 +321,9 @@ func CacheUpdateChannel(channel *Channel) {
 		}
 	}
 	logger.LogDebug(nil, "CacheUpdateChannel after: id=%d, name=%s, status=%d, polling_index=%d", channel.Id, channel.Name, channel.Status, channel.ChannelInfo.MultiKeyPollingIndex)
+	// Refresh this channel's fixed endpoint rows from the database so the
+	// relay-time rejection check never serves stale values.
+	RefreshChannelFixedEndpointEntries(channel.Id)
 	// Lock ordering: do NOT hold channelSyncLock while calling
 	// InvalidatePricingCache. GetPricing acquires updatePricingLock first and then
 	// channelSyncLock.RLock (via loadPricingAdvancedCustomConfigs); acquiring

@@ -36,6 +36,9 @@ func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, re
 	if _, ok := requestData["model_group_modes"]; ok && !channelModelGroupModesEqual(channel.ModelGroupModes, origin.ModelGroupModes) {
 		return true
 	}
+	if _, ok := requestData["model_fixed_endpoints"]; ok && !model.ChannelModelFixedEndpointsEqual(channel.ModelFixedEndpoints, origin.ModelFixedEndpoints) {
+		return true
+	}
 	// Fail closed: any field present in the request that is neither a known
 	// sensitive field (gated above) nor an explicitly classified non-sensitive
 	// field must be treated as sensitive. This keeps a newly added channel field
@@ -75,6 +78,7 @@ var channelSensitiveFields = map[string]struct{}{
 	"settings":            {},
 	"key_mode":            {},
 	"model_group_modes":   {},
+	"model_fixed_endpoints": {},
 }
 
 // channelOperationalFields lists fields managed by operation endpoints instead

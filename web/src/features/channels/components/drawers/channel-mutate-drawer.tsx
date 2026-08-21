@@ -3616,12 +3616,38 @@ export function ChannelMutateDrawer({
                                         'Per-model group publication. Models without a policy inherit the channel groups.'
                                       )}
                                     </FormDescription>
+                                    <FormDescription className='mt-1'>
+                                      {t(
+                                        'Models can be pinned to a fixed endpoint; requests through any other endpoint are rejected.'
+                                      )}
+                                    </FormDescription>
                                   </div>
                                   <ChannelModelGroupPolicies
                                     models={currentModelsArray}
                                     groupOptions={groupOptions}
                                     value={field.value ?? []}
                                     onChange={field.onChange}
+                                    fixedEndpoints={
+                                      form.getValues(
+                                        'model_fixed_endpoints'
+                                      ) ?? {}
+                                    }
+                                    onFixedEndpointChange={(model, endpoint) => {
+                                      const next = {
+                                        ...form.getValues(
+                                          'model_fixed_endpoints'
+                                        ),
+                                      }
+                                      if (endpoint.trim() === '') {
+                                        delete next[model]
+                                      } else {
+                                        next[model] = endpoint
+                                      }
+                                      form.setValue(
+                                        'model_fixed_endpoints',
+                                        next
+                                      )
+                                    }}
                                     disabled={isSubmitting}
                                   />
                                   <FormMessage />

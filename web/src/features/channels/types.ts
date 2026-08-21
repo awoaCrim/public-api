@@ -71,6 +71,7 @@ export const channelSchema = z.object({
   used_quota: z.number().default(0),
   model_mapping: z.string().nullish(),
   model_group_modes: z.array(channelModelGroupModeInputSchema).nullish(),
+  model_fixed_endpoints: z.record(z.string(), z.string()).nullish(),
   status_code_mapping: z.string().nullish(),
   priority: z.number().nullish(),
   auto_ban: z.number().nullish(),
@@ -367,6 +368,7 @@ export interface ChannelFormData {
   group: string
   model_mapping?: string
   model_group_modes?: ChannelModelGroupModeInput[]
+  model_fixed_endpoints?: Record<string, string>
   priority?: number
   weight?: number
   test_model?: string

@@ -60,6 +60,12 @@ type Channel struct {
 	// empty) slice replaces them. Never persisted on the channel row itself.
 	ModelGroupModes *[]ChannelModelGroupModeInput `json:"model_group_modes,omitempty" gorm:"-:all"`
 
+	// ModelFixedEndpoints carries the per-model fixed endpoint (model -> base
+	// URL) on save and load. nil leaves existing rows untouched; an explicit
+	// (even empty) map replaces them. Never persisted on the channel row
+	// itself.
+	ModelFixedEndpoints *map[string]string `json:"model_fixed_endpoints,omitempty" gorm:"-:all"`
+
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
 }
@@ -440,6 +446,11 @@ func GetChannelById(id int, selectAll bool) (*Channel, error) {
 	} else if loadErr != nil {
 		return nil, loadErr
 	}
+	if endpoints, loadErr := LoadChannelModelFixedEndpoints(channel.Id); loadErr == nil && len(endpoints) > 0 {
+		channel.ModelFixedEndpoints = &endpoints
+	} else if loadErr != nil {
+		return nil, loadErr
+	}
 	return channel, nil
 }
 
@@ -458,6 +469,23 @@ func replaceChannelModelGroupModesInTx(tx *gorm.DB, channel *Channel) error {
 		}
 	}
 	return ReplaceChannelModelGroupPolicies(tx, channel.Id, *channel.ModelGroupModes, published)
+}
+
+// replaceChannelModelFixedEndpointsInTx validates and persists the channel's
+// per-model fixed endpoints inside the caller's transaction. A nil map keeps
+// the existing rows untouched.
+func replaceChannelModelFixedEndpointsInTx(tx *gorm.DB, channel *Channel) error {
+	if channel == nil || channel.ModelFixedEndpoints == nil {
+		return nil
+	}
+	published := make(map[string]struct{})
+	for _, model := range channel.GetModels() {
+		model = strings.TrimSpace(model)
+		if model != "" {
+			published[model] = struct{}{}
+		}
+	}
+	return ReplaceChannelModelFixedEndpoints(tx, channel.Id, *channel.ModelFixedEndpoints, published)
 }
 
 func BatchInsertChannels(channels []Channel) error {
@@ -481,6 +509,10 @@ func BatchInsertChannels(channels []Channel) error {
 		}
 		for _, channel_ := range chunk {
 			if err := replaceChannelModelGroupModesInTx(tx, &channel_); err != nil {
+				tx.Rollback()
+				return err
+			}
+			if err := replaceChannelModelFixedEndpointsInTx(tx, &channel_); err != nil {
 				tx.Rollback()
 				return err
 			}
@@ -522,6 +554,12 @@ func BatchDeleteChannels(ids []int) (int64, error) {
 		}
 		if tx.Migrator().HasTable(&ChannelModelGroupDisabled{}) {
 			if err := tx.Where("channel_id in (?)", chunk).Delete(&ChannelModelGroupDisabled{}).Error; err != nil {
+				tx.Rollback()
+				return 0, err
+			}
+		}
+		if tx.Migrator().HasTable(&ChannelModelFixedEndpoint{}) {
+			if err := tx.Where("channel_id in (?)", chunk).Delete(&ChannelModelFixedEndpoint{}).Error; err != nil {
 				tx.Rollback()
 				return 0, err
 			}
@@ -580,6 +618,9 @@ func (channel *Channel) Insert() error {
 		if err := replaceChannelModelGroupModesInTx(tx, channel); err != nil {
 			return err
 		}
+		if err := replaceChannelModelFixedEndpointsInTx(tx, channel); err != nil {
+			return err
+		}
 		return channel.AddAbilities(tx)
 	})
 }
@@ -630,6 +671,9 @@ func (channel *Channel) Update() error {
 		if err := replaceChannelModelGroupModesInTx(tx, channel); err != nil {
 			return err
 		}
+		if err := replaceChannelModelFixedEndpointsInTx(tx, channel); err != nil {
+			return err
+		}
 		if err := tx.Model(channel).First(channel, "id = ?", channel.Id).Error; err != nil {
 			return err
 		}
@@ -665,7 +709,10 @@ func (channel *Channel) Delete() error {
 		if err := tx.Where("channel_id = ?", channel.Id).Delete(&Ability{}).Error; err != nil {
 			return err
 		}
-		return DeleteChannelModelGroupPolicies(tx, channel.Id)
+		if err := DeleteChannelModelGroupPolicies(tx, channel.Id); err != nil {
+			return err
+		}
+		return DeleteChannelModelFixedEndpoints(tx, channel.Id)
 	})
 }
 

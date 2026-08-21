@@ -211,6 +211,7 @@ export const channelFormSchema = z
         })
       )
       .optional(),
+    model_fixed_endpoints: z.record(z.string(), z.string()).optional(),
     model_mapping: z
       .string()
       .optional()
@@ -416,6 +417,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   models: '',
   group: ['default'],
   model_group_modes: [],
+  model_fixed_endpoints: {},
   model_mapping: '',
   priority: 0,
   weight: 0,
@@ -568,6 +570,7 @@ export function transformChannelToFormDefaults(
     models: channel.models || '',
     group: parseGroups(channel.group || 'default'),
     model_group_modes: channel.model_group_modes ?? [],
+    model_fixed_endpoints: channel.model_fixed_endpoints ?? {},
     model_mapping: channel.model_mapping || '',
     priority: channel.priority || 0,
     weight: channel.weight || 0,
@@ -794,6 +797,10 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     openai_organization: formData.openai_organization || null,
     models: formData.models,
     group: formatGroups(formData.group),
+    model_fixed_endpoints: pruneChannelModelFixedEndpoints(
+      formData.model_fixed_endpoints ?? {},
+      parseModels(formData.models)
+    ),
     model_mapping: formData.model_mapping || null,
     priority: formData.priority || null,
     weight: formData.weight || null,
@@ -844,6 +851,10 @@ export function transformFormDataToUpdatePayload(
     group: formatGroups(formData.group),
     model_group_modes: pruneChannelModelGroupModes(
       formData.model_group_modes ?? [],
+      parseModels(formData.models)
+    ),
+    model_fixed_endpoints: pruneChannelModelFixedEndpoints(
+      formData.model_fixed_endpoints ?? {},
       parseModels(formData.models)
     ),
     model_mapping: formData.model_mapping || null,
@@ -925,6 +936,22 @@ export function pruneChannelModelGroupModes(
 ): ChannelModelGroupModeInput[] {
   const modelSet = new Set(models)
   return modes.filter((mode) => modelSet.has(mode.model))
+}
+
+/**
+ * Prune fixed endpoint entries to models currently published by the channel.
+ * Entries for removed models are dropped.
+ */
+export function pruneChannelModelFixedEndpoints(
+  endpoints: Record<string, string>,
+  models: string[]
+): Record<string, string> {
+  const modelSet = new Set(models)
+  return Object.fromEntries(
+    Object.entries(endpoints).filter(
+      ([model, endpoint]) => modelSet.has(model) && endpoint.trim() !== ''
+    )
+  )
 }
 
 export function parseModels(models: string): string[] {

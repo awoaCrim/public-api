@@ -20,6 +20,7 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { MultiSelect } from '@/components/multi-select'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -41,6 +42,9 @@ type ChannelModelGroupPoliciesProps = {
   groupOptions: { value: string; label: string }[]
   value: ChannelModelGroupModeInput[]
   onChange: (next: ChannelModelGroupModeInput[]) => void
+  /** model -> fixed endpoint base URL; empty value removes the pin */
+  fixedEndpoints?: Record<string, string>
+  onFixedEndpointChange?: (model: string, endpoint: string) => void
   disabled?: boolean
 }
 
@@ -88,6 +92,10 @@ export function ChannelModelGroupPolicies(
     props.onChange([...next, { model, mode: 'custom', groups }])
   }
 
+  const onSetFixedEndpoint = props.onFixedEndpointChange
+  const showFixedEndpoint =
+    props.fixedEndpoints !== undefined && onSetFixedEndpoint !== undefined
+
   if (props.models.length === 0) {
     return null
   }
@@ -129,6 +137,21 @@ export function ChannelModelGroupPolicies(
                 onChange={(groups) => updateGroups(model, groups)}
                 placeholder={t('Select groups for this model')}
               />
+            )}
+            {showFixedEndpoint && (
+              <div className='mt-2'>
+                <Input
+                  value={props.fixedEndpoints?.[model] ?? ''}
+                  onChange={(e) =>
+                    onSetFixedEndpoint(model, e.target.value)
+                  }
+                  placeholder={t(
+                    'Fixed endpoint (leave empty for any endpoint)'
+                  )}
+                  disabled={props.disabled}
+                  className='font-mono text-sm'
+                />
+              </div>
             )}
           </div>
         )

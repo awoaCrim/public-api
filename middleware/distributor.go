@@ -163,7 +163,10 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
+			abortWithOpenAiMessage(c, setupErr.StatusCode, setupErr.Error(), setupErr.GetErrorCode())
+			return
+		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
@@ -478,6 +481,12 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	// c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", key))
 	common.SetContextKey(c, constant.ContextKeyChannelKey, key)
 	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, channel.GetBaseURL())
+
+	// A model pinned to a fixed endpoint may only be served through that
+	// endpoint; anything else is rejected outright.
+	if err := model.CheckChannelModelFixedEndpoint(channel.Id, modelName, channel.GetBaseURL()); err != nil {
+		return types.NewError(err, types.ErrorCodeFixedEndpointMismatch, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusForbidden))
+	}
 
 	common.SetContextKey(c, constant.ContextKeySystemPromptOverride, false)
 
