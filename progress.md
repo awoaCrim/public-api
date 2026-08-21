@@ -118,3 +118,11 @@
 - 阶段 1–7、独立 Review、Remediation、产品提交、推送和 `ssh2` 部署均已完成。
 - 下一步：处理 routing-group blocker `渠道1` 后执行严格迁移；按需确认 cookie/proxy 生产配置。
 - 当前分支已 push；未创建 PR，未向 `upstream` 推送。
+
+## 2026-08-22 00:13 +08:00（渠道模型固定端点功能开发与 ssh2 部署）
+
+- 新功能：渠道 -> 编辑 -> 模型分组策略 下方为每个模型新增「固定端点」输入。模型配置固定端点后，relay 请求该模型时若渠道有效 base URL 与固定端点不一致直接拒绝（403，skip-retry），覆盖普通分发、重试、渠道测试、任务重放、vision 子调用全部路径。
+- 实现：新表 `channel_model_fixed_endpoints`（channel_id+model 主键、endpoint，三库兼容 AutoMigrate + migrateDBFast 双注册）；Channel 新增 `model_fixed_endpoints` 传输字段，保存校验（模型必须已发布、http/https URL），删除渠道联动清理；内存索引（InitChannelCache 全量 + CacheUpdateChannel 单渠道刷新，DB 查询兜底）；authz 归入 sensitive 字段；relaykit 新增 `fixed_endpoint_mismatch` 错误码（不带 channel: 前缀避免触发重试）；前端 7 locale + prune + 单测。
+- 验证：受动包 go test 全绿（仅 2 个预存基线失败：HTTP/2 GOAWAY Windows 偶发、service affinity 共享状态，单跑均通过）；relaykit GOWORK=off 构建通过；前端 typecheck/lint/build/20 个测试通过；git diff --check 通过。
+- 提交：`7f3e5f24`（`feat: pin channel models to fixed endpoints`），未 push。
+- 部署：镜像 `newapi-custom:20260822-fixed-endpoint-7f3e5f24`（ID b4f93ef70360）已切换至 ssh2 生产 `newapi` 容器，Restarts=0，`channel_model_fixed_endpoints` 表已建，`/api/status` 与首页 200。部署前 SQLite 在线备份（`one-api.db`，integrity ok）位于 `/opt/newapi/backups/deploy-20260822-001025-fixed-endpoint-7f3e5f24`（含 compose、.env、旧镜像元数据）。
